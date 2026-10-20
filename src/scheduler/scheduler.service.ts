@@ -11,6 +11,7 @@ import {
   MeasurementJobData,
   PRIORITY_SCHEDULED,
 } from './scheduling.service';
+import { deviceIdsOf } from './device-usage';
 
 /**
  * Cron que despacha los ScheduledJobs pendientes.
@@ -85,8 +86,7 @@ export class SchedulerService {
     });
 
     for (const pref of preferences) {
-      busy.add(pref.analyzerDeviceId);
-      busy.add(pref.muxDeviceId);
+      deviceIdsOf(pref).forEach((id) => busy.add(id));
     }
     return busy;
   }
@@ -124,7 +124,7 @@ export class SchedulerService {
     }
 
     // 2. Conflicto de dispositivos: otro job corriendo usa el mismo analyzer/mux
-    if (busyDevices.has(preference.analyzerDeviceId) || busyDevices.has(preference.muxDeviceId)) {
+    if (deviceIdsOf(preference).some((id) => busyDevices.has(id))) {
       this.logger.log(
         `Job ${job.id} pospuesto — dispositivo ocupado por otro job en ejecución`,
       );
@@ -139,8 +139,7 @@ export class SchedulerService {
     if (claimed.count === 0) return; // otro proceso lo tomó
 
     // Reservar los devices para el resto del tick
-    busyDevices.add(preference.analyzerDeviceId);
-    busyDevices.add(preference.muxDeviceId);
+    deviceIdsOf(preference).forEach((id) => busyDevices.add(id));
 
     const ranges: MeasurementRange[] = preference.ranges.map((r) => ({
       startFreq: Number(r.startFreq),

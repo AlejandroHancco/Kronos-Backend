@@ -5,5 +5,5 @@ export class MeasurementResponseDto {
   startFreq: number;
   stopFreq: number;
   analyzerName: string;
-  muxName: string;
+  muxName: string | null;
 }

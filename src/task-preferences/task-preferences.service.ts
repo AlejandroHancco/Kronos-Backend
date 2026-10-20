@@ -29,12 +29,12 @@ export interface TaskPreferenceResponse {
     name: string;
     type: string | null;
     ip: string | null;
-  };
+  } | null;
 }
 
 type TaskPreferenceWithDevices = TaskPreference & {
   analyzerDevice: Device;
-  muxDevice: Device;
+  muxDevice: Device | null;
   ranges: any[];
 };
 
@@ -217,12 +217,14 @@ export class TaskPreferencesService {
         type: preference.analyzerDevice.type,
         ip: preference.analyzerDevice.ip,
       },
-      muxDevice: {
-        id: preference.muxDevice.id,
-        name: preference.muxDevice.name,
-        type: preference.muxDevice.type,
-        ip: preference.muxDevice.ip,
-      },
+      muxDevice: preference.muxDevice
+        ? {
+            id: preference.muxDevice.id,
+            name: preference.muxDevice.name,
+            type: preference.muxDevice.type,
+            ip: preference.muxDevice.ip,
+          }
+        : null,
     };
   }
 }

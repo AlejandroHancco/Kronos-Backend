@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { MeasurementsService, MeasurementRange } from '../measurements/measurements.service';
 import { KronosGateway } from '../gateway/kronos.gateway';
 import { MEASUREMENTS_QUEUE } from '../queue/queue.constants';
+import { PrefDevices, sharesDevice } from './device-usage';
 
 /** Payload de los jobs de la cola 'measurements' */
 export interface MeasurementJobData {
@@ -280,7 +281,7 @@ export class MeasurementSchedulingService {
       select: { taskId: true, analyzerDeviceId: true, muxDeviceId: true },
     });
     // findMany devuelve todas; nos quedamos con la más reciente por tarea
-    const prefByTask = new Map<number, { analyzerDeviceId: string; muxDeviceId: string }>();
+    const prefByTask = new Map<number, PrefDevices>();
     for (const p of preferences) {
       if (!prefByTask.has(p.taskId)) prefByTask.set(p.taskId, p);
     }
@@ -288,10 +289,7 @@ export class MeasurementSchedulingService {
     for (const job of pendingJobs) {
       const pref = prefByTask.get(job.taskId);
       if (!pref) continue;
-      const sharesDevice =
-        pref.analyzerDeviceId === myPreference.analyzerDeviceId ||
-        pref.muxDeviceId === myPreference.muxDeviceId;
-      if (sharesDevice) {
+      if (sharesDevice(pref, myPreference)) {
         return { id: job.id, startAt: job.startAt };
       }
     }

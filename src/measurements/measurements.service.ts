@@ -215,14 +215,16 @@ export class MeasurementsService {
         );
       }
 
-      deviceNames = [taskPreference.analyzerDevice.name, taskPreference.muxDevice.name].filter(Boolean);
+      deviceNames = [taskPreference.analyzerDevice.name, taskPreference.muxDevice?.name].filter(
+          (n): n is string => !!n,
+      );
 
       // Resuelve el plugin según el tipo del analyzer (device.type) — el Kronos Watcher
       // no sabe (ni necesita saber) que hoy es un Hioki IM3570.
       const plugin = this.devicePlugins.get(taskPreference.analyzerDevice.type);
 
       this.logger.log(
-          `Preference found - Analyzer: ${taskPreference.analyzerDevice.ip}:3570, MUX: ${taskPreference.muxDevice.ip}`,
+          `Preference found - Analyzer: ${taskPreference.analyzerDevice.ip}:3570, MUX: ${taskPreference.muxDevice?.ip ?? 'sin MUX'}`,
       );
 
       this.logger.log(
@@ -253,8 +255,10 @@ export class MeasurementsService {
         const channel = uniqueChannels[index];
 
         try {
-          // 4a. Cambiar canal en MUX una sola vez por canal
-          await plugin.selectChannel?.(taskPreference.muxDevice.ip ?? '', channel);
+          // 4a. Cambiar canal en MUX una sola vez por canal (si la tarea tiene MUX)
+          if (taskPreference.muxDevice) {
+            await plugin.selectChannel?.(taskPreference.muxDevice.ip ?? '', channel);
+          }
 
           // 4b. Medir todos los rangos para este canal
           const channelData: Array<[number, number, number]> = [];
@@ -357,8 +361,8 @@ export class MeasurementsService {
           sweepType: firstRange.sweepType,
           analyzerName: taskPreference.analyzerDevice.name,
           analyzerIp: taskPreference.analyzerDevice.ip ?? '',
-          muxName: taskPreference.muxDevice.name,
-          muxIp: taskPreference.muxDevice.ip ?? '',
+          muxName: taskPreference.muxDevice?.name ?? null,
+          muxIp: taskPreference.muxDevice ? (taskPreference.muxDevice.ip ?? '') : null,
           data: measurementData,
         } as any,
       });
