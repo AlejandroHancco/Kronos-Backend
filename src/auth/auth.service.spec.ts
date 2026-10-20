@@ -59,4 +59,24 @@ describe('AuthService.changePassword', () => {
     await expect(service.changePassword('u', 'mala', 'nuevaClave1')).rejects.toThrow();
     expect(sessionEvents.revokeUserSessions).not.toHaveBeenCalled();
   });
+
+  it('rechaza una nueva contraseña que supera 72 bytes UTF-8 aunque tenga pocos caracteres (tildes/ñ cuentan doble)', async () => {
+    prisma.user.findUnique.mockResolvedValue({ uuid: 'u', password: await bcrypt.hash('correcta1', 4) });
+    const newPassword = 'ñ'.repeat(37); // 37 caracteres, 74 bytes UTF-8 (> 72)
+    await expect(service.changePassword('u', 'correcta1', newPassword)).rejects.toThrow(
+      'La nueva contraseña no puede superar 72 bytes (las letras con tilde o ñ cuentan doble)',
+    );
+    expect(prisma.user.update).not.toHaveBeenCalled();
+    expect(sessionEvents.revokeUserSessions).not.toHaveBeenCalled();
+  });
+
+  it('acepta una nueva contraseña de exactamente 72 bytes UTF-8', async () => {
+    prisma.user.findUnique.mockResolvedValue({ uuid: 'u', name: 'U', password: await bcrypt.hash('correcta1', 4) });
+    prisma.user.update.mockResolvedValue({});
+    const newPassword = 'ñ'.repeat(36); // 36 caracteres, 72 bytes UTF-8 exactos
+    expect(Buffer.byteLength(newPassword, 'utf8')).toBe(72);
+    await expect(service.changePassword('u', 'correcta1', newPassword)).resolves.toEqual({
+      ok: true, access_token: 'tok',
+    });
+  });
 });

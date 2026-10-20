@@ -4,6 +4,7 @@ import type { Response } from 'express';
 import { PrismaService } from '../prisma/prisma.service';
 import { TeamScopeService } from '../common/team-scope.service';
 import { buildCsv, csvPreamble, rowsToCsvLines, CsvChannel, CsvMeasurement } from './measurement-csv';
+import { streamMeasurementsCsv, writeChunk } from './csv-stream';
 
 /** Tamaño de página para el streaming de CSV de tarea; evita cargar todas las mediciones en memoria. */
 const CSV_BATCH_SIZE = 10;
@@ -259,34 +260,37 @@ export class ReportsService {
     ]));
 
     const where: Prisma.MeasurementWhereInput = { taskId, ...this.takenAtWhere(range) };
+
+    // El cliente puede cortar la descarga a mitad de camino; `close` es la única señal fiable
+    // (además de `res.destroyed`/`writableEnded`, que ya refleja algunos cierres) para dejar de
+    // consultar la base de datos cuanto antes.
+    let aborted = false;
+    res.on('close', () => { aborted = true; });
+    const isAborted = () => aborted || res.destroyed || res.writableEnded;
+
+    const fetchPage = (cursor: number | null) =>
+      this.prisma.measurement.findMany({
+        where,
+        orderBy: takenAtOrder,
+        ...(cursor === null ? {} : { cursor: { id: cursor }, skip: 1 }),
+        take: CSV_BATCH_SIZE,
+        select: {
+          id: true, takenAt: true, takenByName: true, presetName: true, watcherStatus: true, data: true,
+          measurementChannels: { select: channelSelect },
+        },
+      });
+
+    const toLines = ({ measurementChannels, ...m }: Awaited<ReturnType<typeof fetchPage>>[number]): string[] => {
+      const measurement: CsvMeasurement = { ...m, channels: measurementChannels.map(toCsvChannel) };
+      return rowsToCsvLines(measurement);
+    };
+
     try {
-      let skip = 0;
-      for (;;) {
-        const rows = await this.prisma.measurement.findMany({
-          where,
-          orderBy: takenAtOrder,
-          skip,
-          take: CSV_BATCH_SIZE,
-          select: {
-            id: true, takenAt: true, takenByName: true, presetName: true, watcherStatus: true, data: true,
-            measurementChannels: { select: channelSelect },
-          },
-        });
-        if (rows.length === 0) break;
-
-        for (const { measurementChannels, ...m } of rows) {
-          const measurement: CsvMeasurement = { ...m, channels: measurementChannels.map(toCsvChannel) };
-          const lines = rowsToCsvLines(measurement);
-          if (lines.length) res.write('\r\n' + lines.join('\r\n'));
-        }
-
-        if (rows.length < CSV_BATCH_SIZE) break;
-        skip += CSV_BATCH_SIZE;
-      }
+      await streamMeasurementsCsv(fetchPage, (chunk) => writeChunk(res, chunk), isAborted, toLines);
+      if (!isAborted()) res.end();
     } catch (err) {
       this.logger.error(`Error transmitiendo CSV de tarea ${taskId}`, err instanceof Error ? err.stack : err);
-    } finally {
-      res.end();
+      res.destroy(err instanceof Error ? err : new Error(String(err)));
     }
   }
 }

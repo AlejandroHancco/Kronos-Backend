@@ -50,6 +50,11 @@ export class AuthService {
     if (currentPassword === newPassword) {
       throw new BadRequestException('La nueva contraseña debe ser distinta de la actual');
     }
+    // bcrypt trunca/ignora silenciosamente lo que exceda 72 BYTES (no caracteres); con tildes o
+    // ñ (2 bytes en UTF-8) un password de 72 caracteres puede superar ese límite.
+    if (Buffer.byteLength(newPassword, 'utf8') > 72) {
+      throw new BadRequestException('La nueva contraseña no puede superar 72 bytes (las letras con tilde o ñ cuentan doble)');
+    }
     await this.prisma.user.update({
       where: { uuid: userId },
       data: { password: await bcrypt.hash(newPassword, 10), passwordChangedAt: new Date() },
