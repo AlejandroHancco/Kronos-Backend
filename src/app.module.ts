@@ -25,7 +25,6 @@ import { DevicePluginsModule } from './device-plugins/device-plugins.module';
 import { GatewayModule } from './gateway/gateway.module';
 import { RedisModule } from './redis/redis.module';
 import { CommonModule } from './common/common.module';
-import { PrismaService } from './prisma/prisma.service';
 import { RlsMiddleware } from './prisma/prisma.middleware';
 import { PrismaModule } from './prisma/prisma.module';
 
@@ -69,7 +68,6 @@ import { PrismaModule } from './prisma/prisma.module';
   controllers: [AppController],
   providers: [
     AppService,
-    PrismaService,
     // Aplica el rate limit a toda la API
     {
       provide: APP_GUARD,

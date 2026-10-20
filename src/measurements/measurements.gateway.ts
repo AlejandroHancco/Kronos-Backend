@@ -7,13 +7,18 @@ import {
   OnGatewayConnection,
   OnGatewayDisconnect,
 } from '@nestjs/websockets';
-import { Server, Socket } from 'socket.io';
+import { Namespace, Server, Socket } from 'socket.io';
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { WsAuthService } from '../auth/ws-auth.service';
-import { authenticateSocket, getSocketUser, WS_AUTH_ERROR } from '../auth/ws-socket';
+import { getSocketUser, socketAuthMiddleware, WS_AUTH_ERROR } from '../auth/ws-socket';
 import { PASSWORD_CHANGED_MESSAGE } from '../auth/jwt-user';
 import { SessionEventsService } from '../common/session-events.service';
 
+/**
+ * Gateway de progreso de mediciones (namespace /measurements). Autentica en el handshake con un
+ * middleware de namespace (rechazo → `connect_error`). Sala personal `{userId}`; la pertenencia
+ * es una foto al momento de conectar y no se reevalúa hasta reconectar.
+ */
 @WebSocketGateway({
   namespace: 'measurements',
   cors: {
@@ -35,7 +40,10 @@ export class MeasurementsGateway
     private readonly sessionEvents: SessionEventsService,
   ) {}
 
-  afterInit() {
+  afterInit(server: Namespace) {
+    // Autenticación en el handshake (antes de enviar CONNECT): el rechazo llega como connect_error.
+    server.use(socketAuthMiddleware(this.wsAuth, this.logger));
+
     // Cambio de contraseña → cerrar en vivo los sockets del usuario
     this.unsubscribeSessionEvents = this.sessionEvents.onUserSessionsRevoked((userId) => {
       this.server.to(userId).emit(WS_AUTH_ERROR, { message: PASSWORD_CHANGED_MESSAGE });
@@ -48,10 +56,13 @@ export class MeasurementsGateway
     this.unsubscribeSessionEvents?.();
   }
 
-  /** Requiere `auth: { token }` en el handshake; une al socket a su sala personal `{userId}`. */
-  async handleConnection(socket: Socket) {
-    const user = await authenticateSocket(socket, this.wsAuth, this.logger);
-    if (!user) return;
+  /** El middleware ya autenticó el socket; aquí solo se une a su sala personal `{userId}`. */
+  handleConnection(socket: Socket) {
+    const user = getSocketUser(socket);
+    if (!user) {
+      socket.disconnect(true);
+      return;
+    }
     socket.join(user.id);
     this.logger.log(`👤 Client connected: ${socket.id} (user ${user.id})`);
   }
@@ -66,7 +77,7 @@ export class MeasurementsGateway
    */
   @SubscribeMessage('join')
   async handleJoin(@ConnectedSocket() socket: Socket) {
-    const user = await getSocketUser(socket);
+    const user = getSocketUser(socket);
     if (!user) return;
     socket.join(user.id);
   }

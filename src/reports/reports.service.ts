@@ -4,7 +4,7 @@ import type { Response } from 'express';
 import { PrismaService } from '../prisma/prisma.service';
 import { TeamScopeService } from '../common/team-scope.service';
 import { buildCsv, csvPreamble, rowsToCsvLines, CsvChannel, CsvMeasurement } from './measurement-csv';
-import { streamMeasurementsCsv, writeChunk } from './csv-stream';
+import { keysetAfter, PageCursor, streamMeasurementsCsv, writeChunk } from './csv-stream';
 
 /** Tamaño de página para el streaming de CSV de tarea; evita cargar todas las mediciones en memoria. */
 const CSV_BATCH_SIZE = 10;
@@ -268,11 +268,11 @@ export class ReportsService {
     res.on('close', () => { aborted = true; });
     const isAborted = () => aborted || res.destroyed || res.writableEnded;
 
-    const fetchPage = (cursor: number | null) =>
+    // Keyset manual sobre (takenAt, id): el `cursor` de Prisma re-incluye filas con takenAt NULL.
+    const fetchPage = (cursor: PageCursor) =>
       this.prisma.measurement.findMany({
-        where,
+        where: cursor === null ? where : { AND: [where, keysetAfter(cursor)] },
         orderBy: takenAtOrder,
-        ...(cursor === null ? {} : { cursor: { id: cursor }, skip: 1 }),
         take: CSV_BATCH_SIZE,
         select: {
           id: true, takenAt: true, takenByName: true, presetName: true, watcherStatus: true, data: true,
@@ -286,7 +286,7 @@ export class ReportsService {
     };
 
     try {
-      await streamMeasurementsCsv(fetchPage, (chunk) => writeChunk(res, chunk), isAborted, toLines);
+      await streamMeasurementsCsv(fetchPage, (chunk) => writeChunk(res, chunk), isAborted, toLines, CSV_BATCH_SIZE);
       if (!isAborted()) res.end();
     } catch (err) {
       this.logger.error(`Error transmitiendo CSV de tarea ${taskId}`, err instanceof Error ? err.stack : err);

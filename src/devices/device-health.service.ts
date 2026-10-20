@@ -64,6 +64,14 @@ export class DeviceHealthService {
       data: { status: newStatus },
     });
 
-    await this.kronosGateway.emitDeviceStatusChanged(device.id, device.projectId, newStatus);
+    // Aislado: un fallo al emitir (p. ej. error de DB al resolver equipos) no debe saltar el resto del lote.
+    try {
+      await this.kronosGateway.emitDeviceStatusChanged(device.id, device.projectId, newStatus);
+    } catch (err) {
+      this.logger.error(
+        `No se pudo emitir device:status de ${device.id}`,
+        err instanceof Error ? err.stack : err,
+      );
+    }
   }
 }

@@ -3,40 +3,41 @@ import { Socket } from 'socket.io';
 import { NormalizedUser } from './interfaces/auth.interface';
 import { WsAuthService } from './ws-auth.service';
 
-/** Evento que recibe el cliente cuando se le niega la conexión o una acción. */
+/**
+ * Evento que recibe un socket YA conectado cuando se le revoca la sesión (cambio de contraseña)
+ * o se le niega una acción (p. ej. `join-task` fuera del equipo). El rechazo del handshake NO
+ * usa este evento: llega al cliente como `connect_error` (ver `socketAuthMiddleware`).
+ */
 export const WS_AUTH_ERROR = 'auth:error';
 
+/** Error que socket.io entrega al cliente como `connect_error` (`err.message` y `err.data`). */
+export interface WsAuthRejection extends Error {
+  data: { message: string };
+}
+
 /**
- * Autentica el socket con `handshake.auth.token`. Si falla, emite `auth:error`
- * y desconecta. Guarda la promesa en `socket.data.authReady` para que los
- * handlers que llegan antes de terminar la verificación la esperen.
+ * Middleware de namespace: autentica con `handshake.auth.token` ANTES de que socket.io envíe el
+ * paquete CONNECT. Si falla, el cliente recibe `connect_error` (nunca `connect`), de modo que su
+ * máquina de reintentos no confunde un rechazo con una conexión aceptada.
+ * Si tiene éxito deja el usuario en `socket.data.user`.
  */
-export function authenticateSocket(
-  socket: Socket,
-  wsAuth: WsAuthService,
-  logger: Logger,
-): Promise<NormalizedUser | null> {
-  const ready = (async () => {
+export function socketAuthMiddleware(wsAuth: WsAuthService, logger: Logger) {
+  return async (socket: Socket, next: (err?: Error) => void): Promise<void> => {
     try {
-      const user = await wsAuth.authenticate(socket.handshake.auth?.token);
-      socket.data.user = user;
-      return user;
+      socket.data.user = await wsAuth.authenticate(socket.handshake.auth?.token);
+      next();
     } catch (err) {
       const message =
         err instanceof UnauthorizedException ? err.message : 'Invalid or missing token';
       logger.warn(`Socket ${socket.id} rejected: ${message}`);
-      socket.emit(WS_AUTH_ERROR, { message });
-      socket.disconnect(true);
-      return null;
+      const rejection = new Error(message) as WsAuthRejection;
+      rejection.data = { message };
+      next(rejection);
     }
-  })();
-  socket.data.authReady = ready;
-  return ready;
+  };
 }
 
-/** Usuario autenticado del socket (espera la verificación en curso) o null. */
-export async function getSocketUser(socket: Socket): Promise<NormalizedUser | null> {
-  if (socket.data?.user) return socket.data.user as NormalizedUser;
-  const ready = socket.data?.authReady as Promise<NormalizedUser | null> | undefined;
-  return ready ? ready : null;
+/** Usuario autenticado del socket (el middleware garantiza que existe tras conectar) o null. */
+export function getSocketUser(socket: Socket): NormalizedUser | null {
+  return (socket.data?.user as NormalizedUser | undefined) ?? null;
 }

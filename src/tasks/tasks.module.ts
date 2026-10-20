@@ -1,13 +1,13 @@
 import { Module } from '@nestjs/common';
 import { TasksService } from './tasks.service';
 import { TasksController } from './tasks.controller';
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaModule } from '../prisma/prisma.module';
 import { SchedulerModule } from '../scheduler/scheduler.module';
 import { TaskPreferencesService } from '../task-preferences/task-preferences.service';
 
 @Module({
-  imports: [SchedulerModule],
+  imports: [PrismaModule, SchedulerModule],
   controllers: [TasksController],
-  providers: [TasksService, TaskPreferencesService, PrismaService],
+  providers: [TasksService, TaskPreferencesService],
 })
 export class TasksModule {}

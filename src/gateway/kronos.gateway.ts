@@ -8,10 +8,10 @@ import {
   OnGatewayConnection,
   OnGatewayDisconnect,
 } from '@nestjs/websockets';
-import { Server, Socket } from 'socket.io';
-import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import { Namespace, Server, Socket } from 'socket.io';
+import { ForbiddenException, Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { WsAuthService } from '../auth/ws-auth.service';
-import { authenticateSocket, getSocketUser, WS_AUTH_ERROR } from '../auth/ws-socket';
+import { getSocketUser, socketAuthMiddleware, WS_AUTH_ERROR } from '../auth/ws-socket';
 import { PASSWORD_CHANGED_MESSAGE } from '../auth/jwt-user';
 import { TeamScopeService } from '../common/team-scope.service';
 import { SessionEventsService } from '../common/session-events.service';
@@ -26,9 +26,14 @@ export interface JobStatusPayload {
 
 /**
  * Gateway principal de tiempo real (namespace /kronos).
- * Requiere `auth: { token }` en el handshake (mismas reglas que HTTP).
+ * Requiere `auth: { token }` en el handshake (mismas reglas que HTTP), verificado por un
+ * middleware de namespace: un token inválido se rechaza con `connect_error` sin llegar a conectar.
  * - Sala `user:{userId}`  → estado de jobs y notificaciones personales (unión automática)
+ * - Sala `team:{teamId}`  → estado de dispositivos del equipo (unión automática)
  * - Sala `task:{taskId}`  → updates de mediciones de una tarea del equipo del usuario
+ *
+ * La pertenencia a salas es una foto al momento de conectar: si el usuario cambia de equipo o
+ * pierde acceso a una tarea, no se reevalúa hasta que el socket se reconecte.
  */
 @WebSocketGateway({
   namespace: 'kronos',
@@ -52,7 +57,10 @@ export class KronosGateway
     private readonly sessionEvents: SessionEventsService,
   ) {}
 
-  afterInit() {
+  afterInit(server: Namespace) {
+    // Autenticación en el handshake (antes de enviar CONNECT): el rechazo llega como connect_error.
+    server.use(socketAuthMiddleware(this.wsAuth, this.logger));
+
     // Cambio de contraseña → cerrar en vivo los sockets del usuario
     this.unsubscribeSessionEvents = this.sessionEvents.onUserSessionsRevoked((userId) => {
       const room = `user:${userId}`;
@@ -65,15 +73,26 @@ export class KronosGateway
     this.unsubscribeSessionEvents?.();
   }
 
+  /** El middleware ya autenticó el socket; aquí solo se une a sus salas (foto al conectar). */
   async handleConnection(socket: Socket) {
-    const user = await authenticateSocket(socket, this.wsAuth, this.logger);
-    if (!user) return;
+    const user = getSocketUser(socket);
+    if (!user) {
+      // No debería ocurrir (el middleware rechaza antes); por si acaso, no dejar un socket anónimo.
+      socket.disconnect(true);
+      return;
+    }
     socket.join(`user:${user.id}`);
     try {
       const teamId = await this.teamScope.getTeamId(user.id);
       socket.join(`team:${teamId}`);
-    } catch {
-      // Usuario sin equipo aprobado: no bloquea la conexión, solo no recibe eventos de equipo.
+    } catch (err) {
+      if (!(err instanceof ForbiddenException)) {
+        this.logger.error(
+          `No se pudo unir el socket ${socket.id} a la sala de equipo (user ${user.id})`,
+          err instanceof Error ? err.stack : err,
+        );
+      }
+      // Usuario sin equipo aprobado (Forbidden): no bloquea la conexión, solo no recibe eventos de equipo.
     }
     this.logger.log(`Client connected: ${socket.id} (user ${user.id})`);
   }
@@ -88,7 +107,7 @@ export class KronosGateway
    */
   @SubscribeMessage('join')
   async handleJoin(@ConnectedSocket() socket: Socket) {
-    const user = await getSocketUser(socket);
+    const user = getSocketUser(socket);
     if (!user) return;
     socket.join(`user:${user.id}`);
   }
@@ -96,7 +115,7 @@ export class KronosGateway
   /** Frontend: socket.emit('join-task', taskId) → solo tareas del equipo del usuario */
   @SubscribeMessage('join-task')
   async handleJoinTask(@ConnectedSocket() socket: Socket, @MessageBody() taskId: number | string) {
-    const user = await getSocketUser(socket);
+    const user = getSocketUser(socket);
     if (!user) return;
     const id = Number(taskId);
     try {
@@ -113,7 +132,7 @@ export class KronosGateway
   /** Frontend: socket.emit('leave-task', taskId) */
   @SubscribeMessage('leave-task')
   async handleLeaveTask(@ConnectedSocket() socket: Socket, @MessageBody() taskId: number | string) {
-    const user = await getSocketUser(socket);
+    const user = getSocketUser(socket);
     if (!user) return;
     socket.leave(`task:${Number(taskId)}`);
   }
