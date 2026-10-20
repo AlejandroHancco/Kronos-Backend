@@ -13,6 +13,7 @@ import { WsAuthService } from '../auth/ws-auth.service';
 import { getSocketUser, socketAuthMiddleware, WS_AUTH_ERROR } from '../auth/ws-socket';
 import { PASSWORD_CHANGED_MESSAGE } from '../auth/jwt-user';
 import { SessionEventsService } from '../common/session-events.service';
+import type { MeasurementValueMeta, StoredMeasurementPoint } from './measurement-data';
 
 /**
  * Gateway de progreso de mediciones (namespace /measurements). Autentica en el handshake con un
@@ -116,7 +117,8 @@ export class MeasurementsGateway
     measurementId: number,
     takenAt: Date,
     totalPoints: number,
-    data: any,
+    data: StoredMeasurementPoint[],
+    sensorValues: MeasurementValueMeta[],
   ) {
     this.server.to(userId).emit('measurement:completed', {
       jobId,
@@ -124,6 +126,7 @@ export class MeasurementsGateway
       takenAt,
       totalPoints,
       data,
+      sensorValues,
     });
     this.logger.log(
       `✅ Measurement completed - User: ${userId}, ID: ${measurementId}, Points: ${totalPoints}`,

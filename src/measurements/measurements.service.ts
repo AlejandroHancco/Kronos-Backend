@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { Injectable, HttpException, HttpStatus, Logger, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { TeamScopeService } from '../common/team-scope.service';
@@ -5,8 +6,10 @@ import { MeasurementsGateway } from './measurements.gateway';
 import { KronosGateway } from '../gateway/kronos.gateway';
 import { NotificationsService } from '../notifications/notifications.service';
 import { classifyMeasurement, MeasurementClassification } from './kronos-watcher';
-import { DevicePluginRegistry } from '../device-plugins/device-plugin.registry';
+import { ExperimentConfigService } from '../device-plugins/experiment-config.service';
+import type { MeasuredPoint } from '../device-plugins/device-plugin.interface';
 import { CreateMeasurementDto } from './dto/create-measurement.dto';
+import { buildMeasurementData, ChannelResult, parseSensorValues, storedPointsOf } from './measurement-data';
 
 export interface MeasurementRange {
   startFreq: number;
@@ -25,7 +28,7 @@ export class MeasurementsService {
       private measurementsGateway: MeasurementsGateway,
       private kronosGateway: KronosGateway,
       private notificationsService: NotificationsService,
-      private devicePlugins: DevicePluginRegistry,
+      private experimentConfig: ExperimentConfigService,
   ) {}
 
   /** Notifica al equipo del resultado de una medición (según clasificación del Kronos Watcher), sin romper el flujo si falla. */
@@ -78,8 +81,16 @@ export class MeasurementsService {
 
   async create(createMeasurementDto: CreateMeasurementDto, userId: string) {
     await this.teamScope.assertTaskInTeam(userId, createMeasurementDto.taskId);
+    const { data, sensorValues, ...rest } = createMeasurementDto;
+    if (storedPointsOf(data).length !== data.length) {
+      throw new BadRequestException('data debe usar el formato { frequency, values }');
+    }
     return this.prisma.measurement.create({
-      data: createMeasurementDto,
+      data: {
+        ...rest,
+        sensorValues: parseSensorValues(sensorValues) as unknown as Prisma.InputJsonValue,
+        data: data as Prisma.InputJsonValue,
+      },
     });
   }
 
@@ -199,32 +210,15 @@ export class MeasurementsService {
           (a, b) => a - b,
       );
 
-      // 1. Obtener task_preference activa
-      const taskPreference = await this.prisma.taskPreference.findFirst({
-        where: { taskId },
-        orderBy: { createdAt: 'desc' },
-        include: {
-          analyzerDevice: true,
-          muxDevice: true,
-        },
-      });
-
-      if (!taskPreference) {
-        throw new BadRequestException(
-            'Esta tarea no tiene un analizador y un MUX asignados. Configúralos antes de medir.',
-        );
-      }
-
-      deviceNames = [taskPreference.analyzerDevice.name, taskPreference.muxDevice?.name].filter(
-          (n): n is string => !!n,
-      );
-
-      // Resuelve el plugin según el tipo del analyzer (device.type) — el Kronos Watcher
-      // no sabe (ni necesita saber) que hoy es un Hioki IM3570.
-      const plugin = this.devicePlugins.get(taskPreference.analyzerDevice.type);
+      // 1. Experimento activo (devices + plugin + rango de canales) — valida canales contra lo declarado
+      const { preference: taskPreference, plugin, channelRange, valueMetas } =
+          await this.experimentConfig.assertChannels(taskId, uniqueChannels);
+      const mux = taskPreference.muxDevice;
+      const valueNames = valueMetas.map((v) => v.name);
+      deviceNames = [taskPreference.analyzerDevice.name, mux?.name].filter((n): n is string => !!n);
 
       this.logger.log(
-          `Preference found - Analyzer: ${taskPreference.analyzerDevice.ip}:3570, MUX: ${taskPreference.muxDevice?.ip ?? 'sin MUX'}`,
+          `Experiment - Sensor: ${taskPreference.analyzerDevice.name} (${taskPreference.analyzerDevice.type}), MUX: ${mux?.ip ?? 'sin MUX'}, canales ${channelRange.min}-${channelRange.max}, valores [${valueNames.join(', ')}]`,
       );
 
       this.logger.log(
@@ -240,50 +234,40 @@ export class MeasurementsService {
           taskChannels.map((tc) => [tc.channelNumber, tc.alias]),
       );
 
-      // 3. Inicializar datos
-      const allData = new Map<number, { g: number[]; b: number[] }>();
-
-      // 4. Medir cada canal de forma SECUENCIAL.
+      // 3. Medir cada canal de forma SECUENCIAL.
       //    El MUX solo puede tener un canal activo a la vez —
       //    Promise.all corrupta los datos porque cambia el canal
       //    antes de que el analyzer termine de medir el anterior.
       //    Por cada canal se recorren todos los rangos secuencialmente
       //    sin cambiar el MUX entre rangos.
-      const results: { channel: number; channelData: Array<[number, number, number]> | null }[] = [];
+      const results: ChannelResult[] = [];
 
       for (let index = 0; index < uniqueChannels.length; index++) {
         const channel = uniqueChannels[index];
 
         try {
-          // 4a. Cambiar canal en MUX una sola vez por canal (si la tarea tiene MUX)
-          if (taskPreference.muxDevice) {
-            await plugin.selectChannel?.(taskPreference.muxDevice.ip ?? '', channel);
-          }
+          // 3a. Seleccionar canal solo si la configuración tiene MUX (selector de canal declarado)
+          if (mux) await plugin.selectChannel!(mux.ip ?? '', channel);
 
-          // 4b. Medir todos los rangos para este canal
-          const channelData: Array<[number, number, number]> = [];
+          // 3b. Medir todos los rangos para este canal
+          const points: MeasuredPoint[] = [];
           for (const range of params.ranges) {
-            const rangeData = await plugin.measureChannel({
+            points.push(...await plugin.measureChannel({
               analyzerIp: taskPreference.analyzerDevice.ip ?? '',
               startFreq: range.startFreq,
               stopFreq: range.stopFreq,
               points: range.points,
               sweepType: range.sweepType,
-            });
-            channelData.push(
-                ...rangeData.map(
-                    (p): [number, number, number] => [p.frequency, p.values.g ?? 0, p.values.b ?? 0],
-                ),
-            );
+            }));
           }
 
           this.logger.log(
-              `Channel ${channel} measured - ${channelData.length} points across ${params.ranges.length} ranges`,
+              `Channel ${channel} measured - ${points.length} points across ${params.ranges.length} ranges`,
           );
 
-          results.push({ channel, channelData });
+          results.push({ channel, points });
 
-          // 4c. Emitir progreso DESPUÉS de medir para reflejar estado real
+          // 3c. Emitir progreso DESPUÉS de medir para reflejar estado real
           const progress = Math.round(((index + 1) / uniqueChannels.length) * 100);
           this.measurementsGateway.emitMeasurementProgress(
               userId,
@@ -298,7 +282,7 @@ export class MeasurementsService {
           this.logger.error(
               `Error in channel ${channel}: ${channelError.message}`,
           );
-          results.push({ channel, channelData: null });
+          results.push({ channel, points: null });
 
           const progress = Math.round(((index + 1) / uniqueChannels.length) * 100);
           this.measurementsGateway.emitMeasurementProgress(
@@ -312,31 +296,8 @@ export class MeasurementsService {
         }
       }
 
-      // 5. Procesar resultados
-      for (const { channel, channelData } of results) {
-        if (!channelData) continue;
-
-        for (const [freq, gValue, bValue] of channelData) {
-          if (!allData.has(freq)) {
-            allData.set(freq, {
-              g: Array(16).fill(0),
-              b: Array(16).fill(0),
-            });
-          }
-          const data = allData.get(freq)!;
-          data.g[channel - 1] = gValue;
-          data.b[channel - 1] = bValue;
-        }
-      }
-
-      // 6. Construir array JSONB final ordenado por frecuencia
-      const measurementData = Array.from(allData.entries())
-          .sort(([freqA], [freqB]) => freqA - freqB)
-          .map(([frequency, vals]) => ({
-            frequency,
-            g: vals.g,
-            b: vals.b,
-          }));
+      // 4. Fusionar canales por frecuencia (16 slots por sensorValue declarado)
+      const measurementData = buildMeasurementData(results, valueNames);
 
       this.logger.log(`Total points collected: ${measurementData.length}`);
 
@@ -344,8 +305,8 @@ export class MeasurementsService {
       const lastRange = params.ranges[params.ranges.length - 1];
       const totalPoints = params.ranges.reduce((sum, r) => sum + r.points, 0);
 
-      // 7. Clasificar con el Kronos Watcher y guardar medición en DB
-      const classification = classifyMeasurement(measurementData, uniqueChannels);
+      // 5. Clasificar con el Kronos Watcher y guardar medición en DB
+      const classification = classifyMeasurement(measurementData, uniqueChannels, valueNames);
       const measurement = await this.prisma.measurement.create({
         data: {
           watcherStatus: classification.severity,
@@ -361,15 +322,16 @@ export class MeasurementsService {
           sweepType: firstRange.sweepType,
           analyzerName: taskPreference.analyzerDevice.name,
           analyzerIp: taskPreference.analyzerDevice.ip ?? '',
-          muxName: taskPreference.muxDevice?.name ?? null,
-          muxIp: taskPreference.muxDevice ? (taskPreference.muxDevice.ip ?? '') : null,
-          data: measurementData,
-        } as any,
+          muxName: mux?.name ?? null,
+          muxIp: mux ? (mux.ip ?? '') : null,
+          sensorValues: valueMetas as unknown as Prisma.InputJsonValue,
+          data: measurementData as unknown as Prisma.InputJsonValue,
+        },
       });
 
       this.logger.log(`Measurement saved - ID: ${measurement.id}`);
 
-      // 8. Crear MeasurementChannels usando el alias real si existe
+      // 6. Crear MeasurementChannels usando el alias real si existe
       for (const channelNumber of uniqueChannels) {
         await this.prisma.measurementChannel.create({
           data: {
@@ -384,7 +346,7 @@ export class MeasurementsService {
           `MeasurementChannels created for measurement ${measurement.id}`,
       );
 
-      // 9. Emitir completado (sala personal del usuario + sala de la tarea)
+      // 7. Emitir completado (sala personal del usuario + sala de la tarea)
       this.measurementsGateway.emitMeasurementCompleted(
           userId,
           jobId,
@@ -392,6 +354,7 @@ export class MeasurementsService {
           measurement.takenAt || new Date(),
           measurementData.length,
           measurementData,
+          valueMetas,
       );
 
       this.kronosGateway.emitMeasurementComplete(taskId, {
@@ -408,6 +371,7 @@ export class MeasurementsService {
         takenAt: measurement.takenAt || new Date(),
         totalPoints: measurementData.length,
         data: measurementData,
+        sensorValues: valueMetas,
       };
 
     } catch (error) {

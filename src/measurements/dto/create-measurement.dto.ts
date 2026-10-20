@@ -1,4 +1,5 @@
-import { IsNumber, IsUUID, IsObject, IsString, IsOptional } from 'class-validator';
+import { IsArray, IsNumber, IsUUID, IsString, IsOptional } from 'class-validator';
+import type { MeasurementValueMeta } from '../measurement-data';
 
 export class CreateMeasurementDto {
   @IsNumber()
@@ -29,13 +30,18 @@ export class CreateMeasurementDto {
   @IsString()
   analyzerIp: string;
 
+  @IsOptional()
   @IsString()
-  muxName: string;
+  muxName?: string;
 
+  @IsOptional()
   @IsString()
-  muxIp: string;
+  muxIp?: string;
 
+  @IsArray()
+  data: unknown[]; // JSONB: StoredMeasurementPoint[]
 
-  @IsObject()
-  data: any; // JSONB
+  @IsOptional()
+  @IsArray()
+  sensorValues?: MeasurementValueMeta[];
 }
