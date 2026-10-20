@@ -1,4 +1,5 @@
 import { Injectable, BadRequestException, HttpException, HttpStatus, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { TeamScopeService } from '../common/team-scope.service';
 import { CreateDeviceDto } from './dto/create-device.dto';
@@ -88,12 +89,28 @@ export class DevicesService {
       updateDeviceDto: UpdateDeviceDto,
       userId: string,
   ) {
-    await this.findOneInProject(projectId, deviceId, userId);
-    if (updateDeviceDto.type !== undefined) this.catalogEntry(updateDeviceDto.type);
+    const device = await this.findOneInProject(projectId, deviceId, userId);
+    const data: Prisma.DeviceUncheckedUpdateInput = { ...updateDeviceDto };
+    if (updateDeviceDto.type !== undefined) {
+      const entry = this.catalogEntry(updateDeviceDto.type);
+      if (updateDeviceDto.type !== device.type) {
+        // Cambiar el tipo invalidaría las configuraciones de tareas que ya lo usan como equipo/MUX.
+        const usageCount = await this.prisma.taskPreference.count({
+          where: { OR: [{ analyzerDeviceId: deviceId }, { muxDeviceId: deviceId }] },
+        });
+        if (usageCount > 0) {
+          throw new BadRequestException(
+              'No se puede cambiar el tipo: el dispositivo está en uso en configuraciones de tareas. Quítalo de esas configuraciones primero.',
+          );
+        }
+      }
+      // Misma regla que al crear: los tipos sin dirección no guardan IP.
+      if (!entry.connection.requiresIp) data.ip = null;
+    }
 
     return this.prisma.device.update({
       where: { id: deviceId },
-      data: updateDeviceDto,
+      data,
     });
   }
 

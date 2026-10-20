@@ -8,7 +8,13 @@ function setup() {
   const registry = new DevicePluginRegistry(new HiokiIm3570Plugin(), new SimulatedImpedancePlugin());
   registry.onModuleInit();
   const prisma = {
-    device: { create: jest.fn(async ({ data }) => data), findFirst: jest.fn() },
+    device: {
+      create: jest.fn(async ({ data }) => data),
+      findFirst: jest.fn(),
+      findUnique: jest.fn(async () => ({ id: 'd1', projectId: 'p1', name: 'Eq', type: 'analyzer', ip: '10.0.0.5' })),
+      update: jest.fn(async ({ data }) => data),
+    },
+    taskPreference: { count: jest.fn(async () => 0) },
     measurement: { findFirst: jest.fn() },
   };
   const teamScope = { assertProjectInTeam: jest.fn(), projectWhereForUser: jest.fn(async () => ({})) };
@@ -50,5 +56,38 @@ describe('DevicesService (tipos por plugin)', () => {
     const out = await service.describeForUser('d2', 'u1');
     expect(out.role).toBe('sensor');
     expect(out.service.sensors[0].sensorValues[0].lastMeasured).toBe('2026-10-20T10:00:00.000Z');
+  });
+
+  describe('updateInProject (tipo bloqueado si está en uso)', () => {
+    it('rechaza cambiar el tipo si alguna configuración de tarea usa el dispositivo', async () => {
+      const { service, prisma } = setup();
+      prisma.taskPreference.count.mockResolvedValueOnce(2);
+      await expect(service.updateInProject('p1', 'd1', { type: 'sim-impedance' }, 'u1'))
+        .rejects.toThrow(/en uso en configuraciones de tareas/);
+      expect(prisma.taskPreference.count).toHaveBeenCalledWith({
+        where: { OR: [{ analyzerDeviceId: 'd1' }, { muxDeviceId: 'd1' }] },
+      });
+      expect(prisma.device.update).not.toHaveBeenCalled();
+    });
+
+    it('al cambiar a un tipo sin dirección (no en uso) deja la IP en null', async () => {
+      const { service, prisma } = setup();
+      const out = await service.updateInProject('p1', 'd1', { type: 'sim-impedance', ip: '10.0.0.9' }, 'u1');
+      expect(out).toMatchObject({ type: 'sim-impedance', ip: null });
+      expect(prisma.device.update).toHaveBeenCalled();
+    });
+
+    it('mismo tipo o sin tipo: no consulta uso y conserva la IP enviada', async () => {
+      const { service, prisma } = setup();
+      const out = await service.updateInProject('p1', 'd1', { type: 'analyzer', name: 'Nuevo', ip: '10.0.0.7' }, 'u1');
+      expect(out).toMatchObject({ name: 'Nuevo', ip: '10.0.0.7' });
+      await service.updateInProject('p1', 'd1', { name: 'Otro' }, 'u1');
+      expect(prisma.taskPreference.count).not.toHaveBeenCalled();
+    });
+
+    it('rechaza un tipo desconocido', async () => {
+      const { service } = setup();
+      await expect(service.updateInProject('p1', 'd1', { type: 'osciloscopio' }, 'u1')).rejects.toBeInstanceOf(BadRequestException);
+    });
   });
 });

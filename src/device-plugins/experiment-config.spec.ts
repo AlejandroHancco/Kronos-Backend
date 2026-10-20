@@ -1,6 +1,6 @@
 import { HiokiIm3570Plugin } from './plugins/hioki-im3570.plugin';
 import { SimulatedImpedancePlugin } from './plugins/simulated-impedance.plugin';
-import { channelRangeFor, experimentConfigError, invalidChannels, channelRangeMessage, valueMetasOf } from './experiment-config';
+import { channelRangeFor, channelSelectionError, experimentConfigError, invalidChannels, channelRangeMessage, valueMetasOf } from './experiment-config';
 
 const hioki = new HiokiIm3570Plugin().describe();
 const sim = new SimulatedImpedancePlugin().describe();
@@ -46,4 +46,18 @@ describe('channelRangeFor / invalidChannels', () => {
 it('valueMetasOf aplana los sensorValues declarados', () => {
   expect(valueMetasOf(hioki)).toEqual([{ name: 'g', unit: 'S', label: 'Conductancia' }, { name: 'b', unit: 'S', label: 'Susceptancia' }]);
   expect(valueMetasOf(sim)).toEqual([{ name: 'z', unit: 'Ω', label: 'Módulo de impedancia |Z|' }]);
+});
+
+describe('channelSelectionError', () => {
+  const selector = { selectChannel: async () => undefined };
+  it('sin MUX: nunca hay error', () => {
+    expect(channelSelectionError(false, sim, {})).toBeNull();
+  });
+  it('con MUX y plugin que declara y admite selección de canal: válido', () => {
+    expect(channelSelectionError(true, hioki, selector)).toBeNull();
+  });
+  it('con MUX pero sin channelSelection declarado o sin selectChannel: error claro', () => {
+    expect(channelSelectionError(true, sim, selector)).toMatch(/tiene un MUX pero el equipo no admite selección de canal/);
+    expect(channelSelectionError(true, hioki, {})).toMatch(/tiene un MUX pero el equipo no admite selección de canal/);
+  });
 });

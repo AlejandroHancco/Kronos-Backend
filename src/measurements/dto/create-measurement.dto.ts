@@ -1,5 +1,5 @@
-import { IsArray, IsNumber, IsUUID, IsString, IsOptional } from 'class-validator';
-import type { MeasurementValueMeta } from '../measurement-data';
+import { ArrayMaxSize, ArrayNotEmpty, IsArray, IsNumber, IsUUID, IsString, IsOptional } from 'class-validator';
+import { MAX_POSTED_POINTS, type MeasurementValueMeta } from '../measurement-data';
 
 export class CreateMeasurementDto {
   @IsNumber()
@@ -38,10 +38,13 @@ export class CreateMeasurementDto {
   @IsString()
   muxIp?: string;
 
-  @IsArray()
-  data: unknown[]; // JSONB: StoredMeasurementPoint[]
+  /** JSONB: StoredMeasurementPoint[]; contenido validado por postedMeasurementError (measurement-data.ts). */
+  @IsArray({ message: 'data debe ser un arreglo de puntos { frequency, values }' })
+  @ArrayMaxSize(MAX_POSTED_POINTS, { message: `data admite como máximo ${MAX_POSTED_POINTS} puntos` })
+  data: unknown[];
 
-  @IsOptional()
-  @IsArray()
-  sensorValues?: MeasurementValueMeta[];
+  /** Valores de sensor declarados ({name, unit, label?}); obligatorio y no vacío. */
+  @IsArray({ message: 'sensorValues es obligatorio y debe ser un arreglo de { name, unit, label? }' })
+  @ArrayNotEmpty({ message: 'sensorValues debe declarar al menos un valor' })
+  sensorValues: MeasurementValueMeta[];
 }

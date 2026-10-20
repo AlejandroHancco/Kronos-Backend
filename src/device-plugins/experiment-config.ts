@@ -47,3 +47,17 @@ export function channelRangeMessage(r: ChannelRange, bad: number[]): string {
 export function valueMetasOf(d: DeviceServiceDescription): MeasurementValueMeta[] {
   return d.sensors.flatMap((s) => s.sensorValues.map((v) => ({ name: v.name, unit: v.unit, ...(v.label ? { label: v.label } : {}) })));
 }
+
+/**
+ * Antes de medir: si la configuración tiene MUX, el equipo debe declarar `channelSelection`
+ * y su plugin implementar `selectChannel`. Sin MUX nunca se selecciona canal.
+ */
+export function channelSelectionError(
+  hasMux: boolean,
+  d: DeviceServiceDescription,
+  plugin: { selectChannel?: unknown },
+): string | null {
+  if (!hasMux) return null;
+  if (d.channelSelection && typeof plugin.selectChannel === 'function') return null;
+  return 'La configuración de la tarea tiene un MUX pero el equipo no admite selección de canal; revisa la configuración';
+}

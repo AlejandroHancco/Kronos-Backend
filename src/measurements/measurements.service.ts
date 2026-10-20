@@ -7,9 +7,10 @@ import { KronosGateway } from '../gateway/kronos.gateway';
 import { NotificationsService } from '../notifications/notifications.service';
 import { classifyMeasurement, MeasurementClassification } from './kronos-watcher';
 import { ExperimentConfigService } from '../device-plugins/experiment-config.service';
+import { channelSelectionError } from '../device-plugins/experiment-config';
 import type { MeasuredPoint } from '../device-plugins/device-plugin.interface';
 import { CreateMeasurementDto } from './dto/create-measurement.dto';
-import { buildMeasurementData, ChannelResult, parseSensorValues, storedPointsOf } from './measurement-data';
+import { buildMeasurementData, ChannelResult, parseSensorValues, postedMeasurementError, storedPointsOf } from './measurement-data';
 
 export interface MeasurementRange {
   startFreq: number;
@@ -82,14 +83,14 @@ export class MeasurementsService {
   async create(createMeasurementDto: CreateMeasurementDto, userId: string) {
     await this.teamScope.assertTaskInTeam(userId, createMeasurementDto.taskId);
     const { data, sensorValues, ...rest } = createMeasurementDto;
-    if (storedPointsOf(data).length !== data.length) {
-      throw new BadRequestException('data debe usar el formato { frequency, values }');
-    }
+    const payloadError = postedMeasurementError(sensorValues, data);
+    if (payloadError) throw new BadRequestException(payloadError);
     return this.prisma.measurement.create({
       data: {
         ...rest,
         sensorValues: parseSensorValues(sensorValues) as unknown as Prisma.InputJsonValue,
-        data: data as Prisma.InputJsonValue,
+        // Solo { frequency, values } por punto (claves extra descartadas)
+        data: storedPointsOf(data).map(({ frequency, values }) => ({ frequency, values })) as unknown as Prisma.InputJsonValue,
       },
     });
   }
@@ -211,11 +212,16 @@ export class MeasurementsService {
       );
 
       // 1. Experimento activo (devices + plugin + rango de canales) — valida canales contra lo declarado
-      const { preference: taskPreference, plugin, channelRange, valueMetas } =
+      const { preference: taskPreference, plugin, description, channelRange, valueMetas } =
           await this.experimentConfig.assertChannels(taskId, uniqueChannels);
       const mux = taskPreference.muxDevice;
       const valueNames = valueMetas.map((v) => v.name);
       deviceNames = [taskPreference.analyzerDevice.name, mux?.name].filter((n): n is string => !!n);
+
+      // MUX configurado pero el equipo no sabe seleccionar canal → error claro antes de medir
+      const muxError = channelSelectionError(!!mux, description, plugin);
+      if (muxError) throw new BadRequestException(muxError);
+      const selectChannel = mux ? plugin.selectChannel!.bind(plugin) : null;
 
       this.logger.log(
           `Experiment - Sensor: ${taskPreference.analyzerDevice.name} (${taskPreference.analyzerDevice.type}), MUX: ${mux?.ip ?? 'sin MUX'}, canales ${channelRange.min}-${channelRange.max}, valores [${valueNames.join(', ')}]`,
@@ -247,7 +253,7 @@ export class MeasurementsService {
 
         try {
           // 3a. Seleccionar canal solo si la configuración tiene MUX (selector de canal declarado)
-          if (mux) await plugin.selectChannel!(mux.ip ?? '', channel);
+          if (mux && selectChannel) await selectChannel(mux.ip ?? '', channel);
 
           // 3b. Medir todos los rangos para este canal
           const points: MeasuredPoint[] = [];

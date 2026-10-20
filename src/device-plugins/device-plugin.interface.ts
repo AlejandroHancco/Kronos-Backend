@@ -7,19 +7,35 @@
  * el plugin correspondiente al `device.type` vía `DevicePluginRegistry` y lo invoca a
  * través de esta interfaz. Así, agregar un dispositivo nuevo (type != 'analyzer') no
  * requiere tocar measurements.service.ts — solo registrar un nuevo plugin.
+ *
+ * Correspondencia con IEEE 1876-2019 (capa 1, cláusula 4):
+ *   - SensorMetadata        → Tabla 14 (sensor)
+ *   - SensorValueMetadata   → Tabla 15 (sensorValue)
+ *   - AccessMode            → Tabla 18 (accessMode)
+ *   - ActuatorMetadata      → Tabla 19 (actuator)
+ *   - ActuatorValueMetadata → parte de la Tabla 19 (valores de entrada del actuator)
+ *
+ * Extensiones propias de Kronos (NO forman parte del estándar):
+ *   - `simulated`, `connection` (DeviceConnection) y `channelSelection` (ChannelSelectionBinding)
+ *     en DeviceServiceDescription;
+ *   - `fullName` a nivel superior de DeviceServiceDescription;
+ *   - `label` en SensorValueMetadata (texto en español para leyendas);
+ *   - `lastMeasured` es una aproximación: GET /devices/:id/describe lo deriva de la última
+ *     medición de tareas cuya configuración actual usa el equipo.
+ * Modos de acceso: solo se implementa `pull`; `push` y `stream` se declaran pero no se usan.
  */
 
 export type AccessModeType = 'pull' | 'push' | 'stream';
 export type ValueType = 'double' | 'integer' | 'string' | 'boolean';
 
-/** Tabla 18. Kronos solo implementa 'pull' (push/stream fuera de alcance). */
+/** Tabla 18 (accessMode). Kronos solo implementa 'pull' (push/stream fuera de alcance). */
 export interface AccessMode {
   accessModeType: AccessModeType;
   nominalUpdateInterval?: number;
   userModifiableFrequency?: boolean;
 }
 
-/** Tabla 15: un valor que produce un sensor. `label` es extensión Kronos (texto en español para leyendas). */
+/** Tabla 15 (sensorValue): un valor que produce un sensor. `label` es extensión Kronos (texto en español para leyendas). */
 export interface SensorValueMetadata {
   name: string;
   unit: string;
@@ -33,7 +49,7 @@ export interface SensorValueMetadata {
   lastMeasured?: string;
 }
 
-/** Tabla 14 */
+/** Tabla 14 (sensor) */
 export interface SensorMetadata {
   sensorId: string;
   fullName: string;
@@ -44,7 +60,7 @@ export interface SensorMetadata {
   accessMode: AccessMode;
 }
 
-/** Tabla 19 (valores de entrada que acepta el actuator). */
+/** Parte de la Tabla 19: valores de entrada que acepta el actuator. */
 export interface ActuatorValueMetadata {
   name: string;
   unit: string;
@@ -54,7 +70,7 @@ export interface ActuatorValueMetadata {
   rangeStep?: number;
 }
 
-/** Tabla 19 */
+/** Tabla 19 (actuator) */
 export interface ActuatorMetadata {
   actuatorId: string;
   fullName: string;
