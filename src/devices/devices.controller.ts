@@ -6,6 +6,7 @@ import {
   Delete,
   Body,
   Param,
+  ParseUUIDPipe,
   UseGuards,
 } from '@nestjs/common';
 import { DevicesService } from './devices.service';
@@ -34,6 +35,12 @@ export class DevicesController {
   @RequirePermission('device:create')
   testConnection(@Body() dto: TestConnectionDto) {
     return this.devicesService.testConnection(dto);
+  }
+
+  @Get(':deviceId/describe')
+  @RequirePermission('device:view')
+  describe(@Param('deviceId', ParseUUIDPipe) deviceId: string, @CurrentUser() user: NormalizedUser) {
+    return this.devicesService.describeForUser(deviceId, user.id);
   }
 }
 

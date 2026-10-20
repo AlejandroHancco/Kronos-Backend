@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsIn, IsNotEmpty, IsIP, MaxLength } from 'class-validator';
+import { IsString, IsOptional, IsNotEmpty, IsIP, MaxLength } from 'class-validator';
 
 export class CreateDeviceDto {
   @IsString()
@@ -6,8 +6,10 @@ export class CreateDeviceDto {
   @MaxLength(150)
   name: string;
 
-  @IsIn(['analyzer', 'mux'])
+  /** Validado contra el catálogo de plugins en DevicesService. */
+  @IsString()
   @IsNotEmpty()
+  @MaxLength(50)
   type: string;
 
   @IsIP()

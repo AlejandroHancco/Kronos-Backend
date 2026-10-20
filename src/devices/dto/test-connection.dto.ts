@@ -1,11 +1,13 @@
-import { IsEnum, IsString, IsOptional, IsNumber } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsNumber } from 'class-validator';
 
 export class TestConnectionDto {
-  @IsEnum(['analyzer', 'mux'])
-  type: 'analyzer' | 'mux';
-
   @IsString()
-  ip: string;
+  @IsNotEmpty()
+  type: string;
+
+  @IsOptional()
+  @IsString()
+  ip?: string;
 
   @IsOptional()
   @IsNumber()

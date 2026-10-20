@@ -1,11 +1,11 @@
-import { Injectable, HttpException, HttpStatus, NotFoundException } from '@nestjs/common';
+import { Injectable, BadRequestException, HttpException, HttpStatus, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { TeamScopeService } from '../common/team-scope.service';
 import { CreateDeviceDto } from './dto/create-device.dto';
 import { UpdateDeviceDto } from './dto/update-device.dto';
 import { UpdateDeviceStatusDto } from './dto/update-device-status.dto';
 import { TestConnectionDto } from './dto/test-connection.dto';
-import { DevicePluginRegistry } from '../device-plugins/device-plugin.registry';
+import { DevicePluginRegistry, DeviceTypeCatalogEntry } from '../device-plugins/device-plugin.registry';
 
 @Injectable()
 export class DevicesService {
@@ -58,11 +58,25 @@ export class DevicesService {
     return device;
   }
 
+  /** Tipo de dispositivo según el catálogo de plugins registrados (IEEE 1876 §4). */
+  catalogEntry(type: string | null | undefined): DeviceTypeCatalogEntry {
+    const entry = this.devicePlugins.catalog().find((e) => e.deviceType === type);
+    if (!entry) throw new BadRequestException(`Tipo de dispositivo desconocido: "${type}"`);
+    return entry;
+  }
+
+  /** Tipos de dispositivo que no requieren IP (ej. simulados), usado por el health check. */
+  addresslessTypes(): string[] {
+    return this.devicePlugins.catalog().filter((e) => !e.connection.requiresIp).map((e) => e.deviceType);
+  }
+
   async createInProject(projectId: string, createDeviceDto: CreateDeviceDto, userId: string) {
     await this.teamScope.assertProjectInTeam(userId, projectId);
+    const entry = this.catalogEntry(createDeviceDto.type);
     return this.prisma.device.create({
       data: {
         ...createDeviceDto,
+        ip: entry.connection.requiresIp ? createDeviceDto.ip : null,
         projectId,
       },
     });
@@ -75,6 +89,7 @@ export class DevicesService {
       userId: string,
   ) {
     await this.findOneInProject(projectId, deviceId, userId);
+    if (updateDeviceDto.type !== undefined) this.catalogEntry(updateDeviceDto.type);
 
     return this.prisma.device.update({
       where: { id: deviceId },
@@ -124,22 +139,17 @@ export class DevicesService {
   // ── Test de conexión ───────────────────────────────────────────────────────
 
   async testConnection(dto: TestConnectionDto) {
-    const { type, ip } = dto;
-    const port = dto.port ?? 3570;
-
-    const reachable = await this.checkReachable(type, ip, port);
-    if (reachable) {
-      return {
-        success: true,
-        message: type === 'analyzer' ? `Hioki IM3570 encontrado en ${ip}:${port}` : `MUX encontrado en ${ip}`,
-      };
+    const entry = this.catalogEntry(dto.type);
+    if (entry.connection.requiresIp && !dto.ip) throw new BadRequestException('Este tipo de dispositivo requiere una IP');
+    const port = dto.port ?? entry.connection.defaultPort;
+    const where = dto.ip ? `${dto.ip}${port && entry.connection.defaultPort ? `:${port}` : ''}` : '';
+    const reachable = await this.checkReachable(dto.type, dto.ip ?? null, port);
+    if (!entry.connection.requiresIp) {
+      return { success: reachable, message: `${entry.label} ${reachable ? 'disponible' : 'no disponible'}${entry.simulated ? ' (simulado)' : ''}` };
     }
-    return {
-      success: false,
-      message: type === 'analyzer'
-        ? `No se pudo conectar al analyzer en ${ip}:${port}`
-        : `No se pudo conectar al MUX en ${ip}`,
-    };
+    return reachable
+      ? { success: true, message: `${entry.label} encontrado en ${where}` }
+      : { success: false, message: `No se pudo conectar a ${entry.label} en ${where}` };
   }
 
   /**
@@ -147,8 +157,38 @@ export class DevicesService {
    * periódico. Delega en el plugin registrado para `type` — un dispositivo nuevo
    * (type distinto) queda cubierto automáticamente con solo registrar su plugin.
    */
-  async checkReachable(type: string, ip: string, port = 3570): Promise<boolean> {
+  async checkReachable(type: string, ip: string | null, port?: number): Promise<boolean> {
     if (!this.devicePlugins.has(type)) return false;
-    return this.devicePlugins.get(type).testConnection(ip, type, port);
+    const entry = this.devicePlugins.catalog().find((e) => e.deviceType === type)!;
+    if (entry.connection.requiresIp && !ip) return false;
+    return this.devicePlugins.get(type).testConnection(ip ?? '', type, port ?? entry.connection.defaultPort);
+  }
+
+  /** Service description (IEEE 1876 §4.2) + metadata de instancia para un dispositivo del equipo del usuario. */
+  async describeForUser(deviceId: string, userId: string) {
+    const teamWhere = await this.teamScope.projectWhereForUser(userId);
+    const device = await this.prisma.device.findFirst({
+      where: { id: deviceId, project: teamWhere },
+      select: { id: true, name: true, type: true, ip: true, status: true, projectId: true },
+    });
+    if (!device) throw new NotFoundException('Device not found');
+    const role = this.devicePlugins.role(device.type);
+    if (!role) throw new NotFoundException(`No hay un device plugin registrado para el tipo "${device.type}"`);
+    let service = this.devicePlugins.describe(device.type!);
+    if (role === 'sensor') {
+      // Aproximación: mediciones de tareas cuya preferencia ACTUAL usa este dispositivo.
+      const last = await this.prisma.measurement.findFirst({
+        where: { task: { taskPreferences: { some: { analyzerDeviceId: device.id } } } },
+        orderBy: { takenAt: { sort: 'desc', nulls: 'last' } },
+        select: { takenAt: true },
+      });
+      const lastMeasured = last?.takenAt?.toISOString();
+      if (lastMeasured) {
+        service = { ...service, sensors: service.sensors.map((s) => ({
+          ...s, sensorValues: s.sensorValues.map((v) => ({ ...v, lastMeasured })),
+        })) };
+      }
+    }
+    return { device, role, service };
   }
 }

@@ -8,7 +8,7 @@ const CHECK_INTERVAL_MS = 30_000;
 const CONCURRENCY = 5;
 
 /**
- * Chequea periódicamente si cada dispositivo (analyzer/mux) está online, sin saturar
+ * Chequea periódicamente si cada dispositivo según su plugin está online, sin saturar
  * la red local ni el proceso: corre cada 30s, con un máximo de 5 chequeos en paralelo,
  * y solo escribe en DB / emite por WebSocket cuando el estado realmente cambia.
  */
@@ -30,7 +30,10 @@ export class DeviceHealthService {
 
     try {
       const devices = await this.prisma.device.findMany({
-        where: { ip: { not: null }, status: { not: 'archived' } },
+        where: {
+          status: { not: 'archived' },
+          OR: [{ ip: { not: null } }, { type: { in: this.devicesService.addresslessTypes() } }],
+        },
         select: { id: true, ip: true, type: true, status: true, projectId: true },
       });
 
@@ -52,8 +55,6 @@ export class DeviceHealthService {
     status: string;
     projectId: string;
   }) {
-    if (!device.ip) return;
-
     const reachable = await this.devicesService.checkReachable(device.type ?? 'analyzer', device.ip);
     const newStatus = reachable ? 'online' : 'offline';
 
