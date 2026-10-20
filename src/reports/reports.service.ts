@@ -3,9 +3,10 @@ import { Prisma } from '@prisma/client';
 import type { Response } from 'express';
 import { PrismaService } from '../prisma/prisma.service';
 import { TeamScopeService } from '../common/team-scope.service';
-import { buildCsv, csvPreamble, rowsToCsvLines, CsvChannel, CsvMeasurement } from './measurement-csv';
+import { parseSensorValues, storedPointsOf } from '../measurements/measurement-data';
+import { buildCsv, csvPreamble, rowsToCsvLines, valueColumnsFor, CsvChannel, CsvMeasurement } from './measurement-csv';
 import {
-  fetchKeysetPage, PageCursor, PageIdRow, pageIdsQuery, streamMeasurementsCsv, writeChunk,
+  fetchKeysetPage, PageCursor, PageIdRow, pageIdsQuery, streamMeasurementsCsv, valueColumnsQuery, writeChunk,
 } from './csv-stream';
 
 /** Tamaño de página para el streaming de CSV de tarea; evita cargar todas las mediciones en memoria. */
@@ -150,21 +151,24 @@ export class ReportsService {
     // La más reciente con datos reales: una medición fallida puede tener `data = []`, en cuyo
     // caso no debe ocultar el gráfico de una medición anterior válida. Se revisan hasta
     // LATEST_LOOKBACK mediciones recientes (de más nueva a más vieja) y se toma la primera con
-    // un arreglo `data` no vacío.
+    // `data` con puntos del formato nuevo (los legados se ignoran hasta su migración).
     const recentIds = measurements.slice(-LATEST_LOOKBACK).map((m) => m.id).reverse();
     let latest: {
-      id: number; takenAt: Date | null; sweepType: string; data: Prisma.JsonValue;
+      id: number; takenAt: Date | null; sweepType: string; data: Prisma.JsonValue; sensorValues: Prisma.JsonValue;
       measurementChannels: RawChannel[];
     } | null = null;
     if (recentIds.length) {
       const candidates = await this.prisma.measurement.findMany({
         where: { id: { in: recentIds } },
-        select: { id: true, takenAt: true, sweepType: true, data: true, measurementChannels: { select: channelSelect } },
+        select: {
+          id: true, takenAt: true, sweepType: true, data: true, sensorValues: true,
+          measurementChannels: { select: channelSelect },
+        },
       });
       const byId = new Map(candidates.map((c) => [c.id, c]));
       for (const id of recentIds) {
         const candidate = byId.get(id);
-        if (candidate && Array.isArray(candidate.data) && candidate.data.length > 0) {
+        if (candidate && storedPointsOf(candidate.data).length > 0) {
           latest = candidate;
           break;
         }
@@ -194,7 +198,8 @@ export class ReportsService {
             id: latest.id,
             takenAt: latest.takenAt,
             sweepType: latest.sweepType,
-            data: Array.isArray(latest.data) ? latest.data : [],
+            data: storedPointsOf(latest.data),
+            sensorValues: parseSensorValues(latest.sensorValues),
             channels: latest.measurementChannels.map(toCsvChannel),
           }
         : null,
@@ -207,7 +212,7 @@ export class ReportsService {
       where,
       orderBy: takenAtOrder,
       select: {
-        id: true, takenAt: true, takenByName: true, presetName: true, watcherStatus: true, data: true,
+        id: true, takenAt: true, takenByName: true, presetName: true, watcherStatus: true, data: true, sensorValues: true,
         measurementChannels: { select: channelSelect },
       },
     });
@@ -253,13 +258,20 @@ export class ReportsService {
       : 'todo';
     const filename = `kronos_${slug(task.name)}_${hasRange ? 'rango' : 'todo'}_${yyyymmdd()}.csv`;
 
+    const filter = { taskId, from: range.from, to: range.to };
+    // Encabezado dinámico: debe conocerse antes de transmitir (unión de valores declarados en el
+    // rango). Se consulta antes de cualquier encabezado HTTP para poder fallar con un error JSON.
+    const cols = valueColumnsFor(
+      parseSensorValues(await this.prisma.$queryRaw<{ name: string; unit: string }[]>(valueColumnsQuery(filter))),
+    );
+
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
 
     res.write(csvPreamble([
       `Kronos | Proyecto: ${task.project.name} | Tarea: ${task.name}`,
       `Generado: ${new Date().toISOString()} | Rango: ${rangeText}`,
-    ]));
+    ], cols));
 
     // El cliente puede cortar la descarga a mitad de camino; `close` es la única señal fiable
     // (además de `res.destroyed`/`writableEnded`, que ya refleja algunos cierres) para dejar de
@@ -272,7 +284,6 @@ export class ReportsService {
     // de JS trunca a ms y duplicaría/saltaría filas. El filtro equivale a
     // `{ taskId, ...takenAtWhere(range) }`. Luego se cargan las filas por id y se reordenan
     // (fetchKeysetPage).
-    const filter = { taskId, from: range.from, to: range.to };
     const fetchPage = (cursor: PageCursor) =>
       fetchKeysetPage(
         (sqlCursor, limit) => this.prisma.$queryRaw<PageIdRow[]>(pageIdsQuery(filter, sqlCursor, limit)),
@@ -280,7 +291,7 @@ export class ReportsService {
           this.prisma.measurement.findMany({
             where: { id: { in: ids } },
             select: {
-              id: true, takenAt: true, takenByName: true, presetName: true, watcherStatus: true, data: true,
+              id: true, takenAt: true, takenByName: true, presetName: true, watcherStatus: true, data: true, sensorValues: true,
               measurementChannels: { select: channelSelect },
             },
           }),
@@ -290,7 +301,7 @@ export class ReportsService {
 
     const toLines = ({ measurementChannels, takenAtKey: _key, ...m }: Awaited<ReturnType<typeof fetchPage>>[number]): string[] => {
       const measurement: CsvMeasurement = { ...m, channels: measurementChannels.map(toCsvChannel) };
-      return rowsToCsvLines(measurement);
+      return rowsToCsvLines(measurement, cols);
     };
 
     try {

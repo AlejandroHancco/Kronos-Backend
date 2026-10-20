@@ -52,6 +52,29 @@ export interface PageIdRow {
   takenAtKey: string | null;
 }
 
+/** Condiciones SQL de tarea/rango (alias `m`), compartidas por el keyset y la unión de columnas. */
+export function filterConditions(filter: PageFilter): Prisma.Sql[] {
+  const conds: Prisma.Sql[] = [Prisma.sql`m."taskId" = ${filter.taskId}`];
+  // Igual que `takenAt: { gte, lte }` de Prisma: con rango, las filas NULL quedan fuera.
+  if (filter.from) conds.push(Prisma.sql`m."takenAt" >= ${filter.from.toISOString()}::timestamptz`);
+  if (filter.to) conds.push(Prisma.sql`m."takenAt" <= ${filter.to.toISOString()}::timestamptz`);
+  return conds;
+}
+
+/**
+ * Unión (name, unit) de los sensorValues de las mediciones del filtro, en orden de declaración;
+ * se calcula ANTES de escribir el encabezado del CSV transmitido. Filas: `{ name, unit }`.
+ */
+export function valueColumnsQuery(filter: PageFilter): Prisma.Sql {
+  return Prisma.sql`SELECT e.v->>'name' AS name, COALESCE(e.v->>'unit', '') AS unit
+    FROM platform.measurements m
+    CROSS JOIN LATERAL jsonb_array_elements(COALESCE(m."sensorValues", '[]'::jsonb)) WITH ORDINALITY AS e(v, idx)
+    WHERE ${Prisma.join(filterConditions(filter), ' AND ')}
+      AND jsonb_typeof(m."sensorValues") = 'array'
+    GROUP BY 1, 2
+    ORDER BY MIN(e.idx), 1, 2`;
+}
+
 /**
  * SQL de la siguiente página de ids en el orden `takenAt ASC NULLS FIRST, id ASC`, estrictamente
  * después de `cursor`. La comparación se hace en SQL contra el valor almacenado (no contra un
@@ -60,10 +83,7 @@ export interface PageIdRow {
  * fila cursor borrada entre páginas no corta la descarga en silencio. Todo va parametrizado.
  */
 export function pageIdsQuery(filter: PageFilter, cursor: SqlCursor, batchSize: number): Prisma.Sql {
-  const conds: Prisma.Sql[] = [Prisma.sql`m."taskId" = ${filter.taskId}`];
-  // Igual que `takenAt: { gte, lte }` de Prisma: con rango, las filas NULL quedan fuera.
-  if (filter.from) conds.push(Prisma.sql`m."takenAt" >= ${filter.from.toISOString()}::timestamptz`);
-  if (filter.to) conds.push(Prisma.sql`m."takenAt" <= ${filter.to.toISOString()}::timestamptz`);
+  const conds = filterConditions(filter);
   if (cursor !== null) {
     if (cursor.takenAtKey === null) {
       // Aún dentro del bloque de NULLs: resto de NULLs con id mayor, luego todas las no nulas.

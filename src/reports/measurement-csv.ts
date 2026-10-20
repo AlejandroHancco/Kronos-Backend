@@ -1,10 +1,38 @@
 import { toCsvCell, toCsvRow } from './csv.util';
+import { parseSensorValues, storedPointsOf, type MeasurementValueMeta } from '../measurements/measurement-data';
 
-export const CSV_HEADER = [
-  'measurement_id', 'taken_at', 'taken_by', 'preset', 'watcher_status',
-  'frequency_hz', 'channel', 'channel_alias', 'g_s', 'b_s',
-  'concrete_mix', 'has_emulsifier', 'sample_age', 'temperature', 'humidity', 'notes',
-];
+const HEADER_BEFORE = ['measurement_id', 'taken_at', 'taken_by', 'preset', 'watcher_status', 'frequency_hz', 'channel', 'channel_alias'];
+const HEADER_AFTER = ['concrete_mix', 'has_emulsifier', 'sample_age', 'temperature', 'humidity', 'notes'];
+
+/** Columna de valor del CSV: un sensorValue declarado (name, unit) y su nombre de columna ASCII. */
+export interface CsvValueColumn { name: string; unit: string; column: string }
+
+/** Unidad → sufijo ASCII de columna: S→s (compatibilidad con g_s/b_s), Ω→ohm, kΩ→kohm, °→deg. */
+export function unitSlug(unit: string): string {
+  return unit.replace(/Ω/g, 'ohm').replace(/[µμ]/g, 'u').replace(/°/g, 'deg')
+    .normalize('NFD').replace(/[^a-zA-Z0-9]+/g, '').toLowerCase();
+}
+
+/** Columnas de valor (en orden) para los sensorValues dados; deduplica por nombre de columna. */
+export function valueColumnsFor(metas: MeasurementValueMeta[]): CsvValueColumn[] {
+  const seen = new Set<string>();
+  const cols: CsvValueColumn[] = [];
+  for (const { name, unit } of metas) {
+    const base = name.replace(/[^a-zA-Z0-9_]+/g, '_').toLowerCase();
+    const slug = unitSlug(unit);
+    const column = slug ? `${base}_${slug}` : base;
+    if (!seen.has(column)) {
+      seen.add(column);
+      cols.push({ name, unit, column });
+    }
+  }
+  return cols;
+}
+
+export const csvHeader = (cols: CsvValueColumn[]): string[] =>
+  [...HEADER_BEFORE, ...cols.map((c) => c.column), ...HEADER_AFTER];
+
+const metaKey = (name: string, unit: string) => `${name}\u0000${unit}`;
 
 export interface CsvChannel {
   channelNumber: number;
@@ -24,18 +52,19 @@ export interface CsvMeasurement {
   presetName: string | null;
   watcherStatus: string | null;
   data: unknown;
+  /** Snapshot `Measurement.sensorValues` (MeasurementValueMeta[]); se valida con parseSensorValues. */
+  sensorValues: unknown;
   channels: CsvChannel[];
 }
 
-interface StoredPoint {
-  frequency: number;
-  g?: number[];
-  b?: number[];
-}
-
-/** Formato largo: una fila por (frecuencia, canal medido). Solo canales con fila en measurement_channels. */
-export function measurementToRows(m: CsvMeasurement): unknown[][] {
-  const points = Array.isArray(m.data) ? (m.data as StoredPoint[]) : [];
+/**
+ * Formato largo: una fila por (frecuencia, canal medido). Solo canales con fila en
+ * measurement_channels. Cada columna de `cols` toma el valor del slot del canal si la medición
+ * declaró ese (name, unit); si no, queda vacía. Puntos legados ({frequency, g, b}) se ignoran.
+ */
+export function measurementToRows(m: CsvMeasurement, cols: CsvValueColumn[]): unknown[][] {
+  const points = storedPointsOf(m.data);
+  const declared = new Set(parseSensorValues(m.sensorValues).map((v) => metaKey(v.name, v.unit)));
   const channels = [...m.channels].sort((a, b) => a.channelNumber - b.channelNumber);
   const rows: unknown[][] = [];
 
@@ -51,8 +80,7 @@ export function measurementToRows(m: CsvMeasurement): unknown[][] {
         point.frequency,
         ch.channelNumber,
         ch.channelAlias ?? '',
-        point.g?.[idx] ?? null,
-        point.b?.[idx] ?? null,
+        ...cols.map((c) => (declared.has(metaKey(c.name, c.unit)) ? point.values[c.name]?.[idx] ?? null : null)),
         ch.concreteMix,
         ch.hasEmulsifier,
         ch.sampleAge,
@@ -71,21 +99,22 @@ export function measurementToRows(m: CsvMeasurement): unknown[][] {
  * proyecto/tarea controlados por el usuario, así que comas/comillas se citan (RFC 4180) y no
  * se "parten" en columnas que Excel podría evaluar como fórmula (CSV injection).
  */
-export function csvPreamble(metaLines: string[]): string {
+export function csvPreamble(metaLines: string[], cols: CsvValueColumn[]): string {
   const lines = [
     ...metaLines.map((l) => toCsvCell(`# ${l.replace(/[\r\n]+/g, ' ')}`)),
-    CSV_HEADER.join(','),
+    csvHeader(cols).join(','),
   ];
   return '﻿' + lines.join('\r\n');
 }
 
 /** Líneas CSV (sin BOM ni encabezado) para una medición; una por (frecuencia, canal medido). */
-export function rowsToCsvLines(m: CsvMeasurement): string[] {
-  return measurementToRows(m).map(toCsvRow);
+export function rowsToCsvLines(m: CsvMeasurement, cols: CsvValueColumn[]): string[] {
+  return measurementToRows(m, cols).map(toCsvRow);
 }
 
-/** CSV completo: preámbulo + filas de todas las mediciones. */
+/** CSV completo: preámbulo + filas; las columnas de valor son la unión de los sensorValues declarados. */
 export function buildCsv(metaLines: string[], measurements: CsvMeasurement[]): string {
-  const lines = [csvPreamble(metaLines), ...measurements.flatMap(rowsToCsvLines)];
+  const cols = valueColumnsFor(measurements.flatMap((m) => parseSensorValues(m.sensorValues)));
+  const lines = [csvPreamble(metaLines, cols), ...measurements.flatMap((m) => rowsToCsvLines(m, cols))];
   return lines.join('\r\n');
 }

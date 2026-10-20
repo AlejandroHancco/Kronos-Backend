@@ -9,6 +9,7 @@ import {
   SqlCursor,
   streamMeasurementsCsv,
   toSqlCursor,
+  valueColumnsQuery,
   writeChunk,
   StreamableRow,
 } from './csv-stream';
@@ -361,5 +362,17 @@ describe('writeChunk', () => {
     } finally {
       process.off('warning', warn);
     }
+  });
+});
+
+describe('valueColumnsQuery', () => {
+  it('unión de (name, unit) declarados con el mismo filtro que el keyset, en orden declarado', () => {
+    const from = new Date('2026-01-01T00:00:00.000Z');
+    const q = valueColumnsQuery({ taskId: 7, from, to: null });
+    expect(q.text).toContain(`jsonb_array_elements(COALESCE(m."sensorValues", '[]'::jsonb)) WITH ORDINALITY`);
+    expect(q.text).toContain('m."taskId" = $1');
+    expect(q.text).toContain('m."takenAt" >= $2::timestamptz');
+    expect(q.text).toContain('ORDER BY MIN(e.idx)');
+    expect(q.values).toEqual([7, from.toISOString()]);
   });
 });
