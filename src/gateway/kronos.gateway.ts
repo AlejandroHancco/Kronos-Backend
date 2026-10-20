@@ -9,7 +9,7 @@ import {
   OnGatewayDisconnect,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { WsAuthService } from '../auth/ws-auth.service';
 import { authenticateSocket, getSocketUser, WS_AUTH_ERROR } from '../auth/ws-socket';
 import { PASSWORD_CHANGED_MESSAGE } from '../auth/jwt-user';
@@ -39,9 +39,10 @@ export interface JobStatusPayload {
 })
 @Injectable()
 export class KronosGateway
-  implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect
+  implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect, OnModuleDestroy
 {
   private readonly logger = new Logger(KronosGateway.name);
+  private unsubscribeSessionEvents?: () => void;
 
   @WebSocketServer() server: Server;
 
@@ -53,17 +54,27 @@ export class KronosGateway
 
   afterInit() {
     // Cambio de contraseña → cerrar en vivo los sockets del usuario
-    this.sessionEvents.onUserSessionsRevoked((userId) => {
+    this.unsubscribeSessionEvents = this.sessionEvents.onUserSessionsRevoked((userId) => {
       const room = `user:${userId}`;
       this.server.to(room).emit(WS_AUTH_ERROR, { message: PASSWORD_CHANGED_MESSAGE });
       this.server.in(room).disconnectSockets(true);
     });
   }
 
+  onModuleDestroy() {
+    this.unsubscribeSessionEvents?.();
+  }
+
   async handleConnection(socket: Socket) {
     const user = await authenticateSocket(socket, this.wsAuth, this.logger);
     if (!user) return;
     socket.join(`user:${user.id}`);
+    try {
+      const teamId = await this.teamScope.getTeamId(user.id);
+      socket.join(`team:${teamId}`);
+    } catch {
+      // Usuario sin equipo aprobado: no bloquea la conexión, solo no recibe eventos de equipo.
+    }
     this.logger.log(`Client connected: ${socket.id} (user ${user.id})`);
   }
 
@@ -125,9 +136,12 @@ export class KronosGateway
     this.logger.log(`notification emitted to user:${userId}`);
   }
 
-  /** Cambio de estado online/offline de un dispositivo (broadcast: no es información sensible) */
-  emitDeviceStatusChanged(deviceId: string, projectId: string, status: string) {
-    this.server.emit('device:status', { deviceId, projectId, status });
-    this.logger.log(`device:status ${status} emitted for device ${deviceId}`);
+  /** Cambio de estado online/offline de un dispositivo: solo a los equipos del proyecto */
+  async emitDeviceStatusChanged(deviceId: string, projectId: string, status: string) {
+    const teamIds = await this.teamScope.teamIdsForProject(projectId);
+    for (const teamId of teamIds) {
+      this.server.to(`team:${teamId}`).emit('device:status', { deviceId, projectId, status });
+    }
+    this.logger.log(`device:status ${status} emitted for device ${deviceId} to ${teamIds.length} team(s)`);
   }
 }

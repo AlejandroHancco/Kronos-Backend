@@ -84,6 +84,35 @@ export class TeamScopeService {
     if (!job) throw new NotFoundException('Scheduled job not found');
   }
 
+  /**
+   * teamIds (APPROVED) de los equipos cuyos miembros tienen algún rol en el proyecto.
+   * Usado para enrutar eventos de socket (p.ej. estado de dispositivo) solo a los
+   * equipos relacionados con el proyecto, sin exponer a toda la plataforma.
+   */
+  async teamIdsForProject(projectId: string): Promise<string[]> {
+    const roles = await this.prisma.userProjectRole.findMany({
+      where: { projectId },
+      select: {
+        user: {
+          select: {
+            teamMembers: {
+              where: { status: 'APPROVED' },
+              select: { teamId: true },
+            },
+          },
+        },
+      },
+    });
+
+    const teamIds = new Set<string>();
+    for (const role of roles) {
+      for (const member of role.user.teamMembers) {
+        teamIds.add(member.teamId);
+      }
+    }
+    return [...teamIds];
+  }
+
   /** Verifica que el usuario pertenezca (APPROVED) al equipo indicado */
   async assertTeamAccess(userId: string, teamId: string): Promise<void> {
     const member = await this.prisma.teamMember.findFirst({

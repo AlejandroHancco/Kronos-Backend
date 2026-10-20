@@ -8,7 +8,7 @@ import {
   OnGatewayDisconnect,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { WsAuthService } from '../auth/ws-auth.service';
 import { authenticateSocket, getSocketUser, WS_AUTH_ERROR } from '../auth/ws-socket';
 import { PASSWORD_CHANGED_MESSAGE } from '../auth/jwt-user';
@@ -23,9 +23,10 @@ import { SessionEventsService } from '../common/session-events.service';
 })
 @Injectable()
 export class MeasurementsGateway
-  implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect
+  implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect, OnModuleDestroy
 {
   private readonly logger = new Logger(MeasurementsGateway.name);
+  private unsubscribeSessionEvents?: () => void;
 
   @WebSocketServer() server: Server;
 
@@ -36,11 +37,15 @@ export class MeasurementsGateway
 
   afterInit() {
     // Cambio de contraseña → cerrar en vivo los sockets del usuario
-    this.sessionEvents.onUserSessionsRevoked((userId) => {
+    this.unsubscribeSessionEvents = this.sessionEvents.onUserSessionsRevoked((userId) => {
       this.server.to(userId).emit(WS_AUTH_ERROR, { message: PASSWORD_CHANGED_MESSAGE });
       this.server.in(userId).disconnectSockets(true);
     });
     this.logger.log('✅ WebSocket Gateway initialized');
+  }
+
+  onModuleDestroy() {
+    this.unsubscribeSessionEvents?.();
   }
 
   /** Requiere `auth: { token }` en el handshake; une al socket a su sala personal `{userId}`. */

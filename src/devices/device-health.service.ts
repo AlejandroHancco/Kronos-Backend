@@ -64,6 +64,6 @@ export class DeviceHealthService {
       data: { status: newStatus },
     });
 
-    this.kronosGateway.emitDeviceStatusChanged(device.id, device.projectId, newStatus);
+    await this.kronosGateway.emitDeviceStatusChanged(device.id, device.projectId, newStatus);
   }
 }
