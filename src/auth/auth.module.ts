@@ -7,6 +7,7 @@ import { AuthController } from './auth.controller';
 import { JwtStrategy } from './jwt.strategy';
 import { SupabaseStrategy } from './supabase.strategy';
 import { CombinedAuthGuard } from './combined-auth.guard';
+import { WsAuthService } from './ws-auth.service';
 import { PrismaModule } from '../prisma/prisma.module';
 
 @Module({
@@ -24,7 +25,7 @@ import { PrismaModule } from '../prisma/prisma.module';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy, SupabaseStrategy, CombinedAuthGuard],
-  exports: [AuthService, CombinedAuthGuard],
+  providers: [AuthService, JwtStrategy, SupabaseStrategy, CombinedAuthGuard, WsAuthService],
+  exports: [AuthService, CombinedAuthGuard, WsAuthService],
 })
 export class AuthModule {}

@@ -4,7 +4,8 @@ import { AuthService } from './auth.service';
 describe('AuthService.changePassword', () => {
   const prisma = { user: { findUnique: jest.fn(), update: jest.fn() } };
   const jwtService = { sign: jest.fn().mockReturnValue('tok') };
-  const service = new AuthService(prisma as any, jwtService as any, {} as any);
+  const sessionEvents = { revokeUserSessions: jest.fn() };
+  const service = new AuthService(prisma as any, jwtService as any, {} as any, sessionEvents as any);
 
   beforeEach(() => jest.clearAllMocks());
 
@@ -14,6 +15,7 @@ describe('AuthService.changePassword', () => {
       'Tu cuenta usa Google; no tiene contraseña local',
     );
     expect(prisma.user.update).not.toHaveBeenCalled();
+    expect(sessionEvents.revokeUserSessions).not.toHaveBeenCalled();
   });
 
   it('rechaza la contraseña actual incorrecta', async () => {
@@ -40,5 +42,21 @@ describe('AuthService.changePassword', () => {
     expect(call.where).toEqual({ uuid: 'u' });
     expect(await bcrypt.compare('nuevaClave1', call.data.password)).toBe(true);
     expect(call.data.passwordChangedAt).toBeInstanceOf(Date);
+  });
+
+  it('desconecta los sockets del usuario tras cambiar la contraseña', async () => {
+    prisma.user.findUnique.mockResolvedValue({ uuid: 'u', name: 'U', password: await bcrypt.hash('correcta1', 4) });
+    prisma.user.update.mockResolvedValue({});
+    await service.changePassword('u', 'correcta1', 'nuevaClave1');
+    expect(sessionEvents.revokeUserSessions).toHaveBeenCalledWith('u');
+    expect(prisma.user.update.mock.invocationCallOrder[0]).toBeLessThan(
+      sessionEvents.revokeUserSessions.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('no desconecta sockets si la contraseña actual es incorrecta', async () => {
+    prisma.user.findUnique.mockResolvedValue({ uuid: 'u', password: await bcrypt.hash('correcta1', 4) });
+    await expect(service.changePassword('u', 'mala', 'nuevaClave1')).rejects.toThrow();
+    expect(sessionEvents.revokeUserSessions).not.toHaveBeenCalled();
   });
 });

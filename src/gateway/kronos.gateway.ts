@@ -4,11 +4,17 @@ import {
   SubscribeMessage,
   ConnectedSocket,
   MessageBody,
+  OnGatewayInit,
   OnGatewayConnection,
   OnGatewayDisconnect,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { Injectable, Logger } from '@nestjs/common';
+import { WsAuthService } from '../auth/ws-auth.service';
+import { authenticateSocket, getSocketUser, WS_AUTH_ERROR } from '../auth/ws-socket';
+import { PASSWORD_CHANGED_MESSAGE } from '../auth/jwt-user';
+import { TeamScopeService } from '../common/team-scope.service';
+import { SessionEventsService } from '../common/session-events.service';
 
 export interface JobStatusPayload {
   jobId: string;
@@ -20,8 +26,9 @@ export interface JobStatusPayload {
 
 /**
  * Gateway principal de tiempo real (namespace /kronos).
- * - Sala `user:{userId}`  → estado de jobs y notificaciones personales
- * - Sala `task:{taskId}`  → updates de mediciones de una tarea específica
+ * Requiere `auth: { token }` en el handshake (mismas reglas que HTTP).
+ * - Sala `user:{userId}`  → estado de jobs y notificaciones personales (unión automática)
+ * - Sala `task:{taskId}`  → updates de mediciones de una tarea del equipo del usuario
  */
 @WebSocketGateway({
   namespace: 'kronos',
@@ -31,37 +38,73 @@ export interface JobStatusPayload {
   },
 })
 @Injectable()
-export class KronosGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class KronosGateway
+  implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect
+{
   private readonly logger = new Logger(KronosGateway.name);
 
   @WebSocketServer() server: Server;
 
-  handleConnection(socket: Socket) {
-    this.logger.log(`Client connected: ${socket.id}`);
+  constructor(
+    private readonly wsAuth: WsAuthService,
+    private readonly teamScope: TeamScopeService,
+    private readonly sessionEvents: SessionEventsService,
+  ) {}
+
+  afterInit() {
+    // Cambio de contraseña → cerrar en vivo los sockets del usuario
+    this.sessionEvents.onUserSessionsRevoked((userId) => {
+      const room = `user:${userId}`;
+      this.server.to(room).emit(WS_AUTH_ERROR, { message: PASSWORD_CHANGED_MESSAGE });
+      this.server.in(room).disconnectSockets(true);
+    });
+  }
+
+  async handleConnection(socket: Socket) {
+    const user = await authenticateSocket(socket, this.wsAuth, this.logger);
+    if (!user) return;
+    socket.join(`user:${user.id}`);
+    this.logger.log(`Client connected: ${socket.id} (user ${user.id})`);
   }
 
   handleDisconnect(socket: Socket) {
     this.logger.log(`Client disconnected: ${socket.id}`);
   }
 
-  /** Frontend: socket.emit('join', userId) → sala personal */
+  /**
+   * Compatibilidad: socket.emit('join', userId). El userId del cuerpo se ignora;
+   * el socket solo puede estar en su propia sala (idempotente).
+   */
   @SubscribeMessage('join')
-  handleJoin(@ConnectedSocket() socket: Socket, @MessageBody() userId: string) {
-    socket.join(`user:${userId}`);
-    this.logger.log(`User ${userId} joined personal room`);
+  async handleJoin(@ConnectedSocket() socket: Socket) {
+    const user = await getSocketUser(socket);
+    if (!user) return;
+    socket.join(`user:${user.id}`);
   }
 
-  /** Frontend: socket.emit('join-task', taskId) → suscripción a updates de la tarea */
+  /** Frontend: socket.emit('join-task', taskId) → solo tareas del equipo del usuario */
   @SubscribeMessage('join-task')
-  handleJoinTask(@ConnectedSocket() socket: Socket, @MessageBody() taskId: number | string) {
-    socket.join(`task:${taskId}`);
-    this.logger.log(`Socket ${socket.id} joined task room ${taskId}`);
+  async handleJoinTask(@ConnectedSocket() socket: Socket, @MessageBody() taskId: number | string) {
+    const user = await getSocketUser(socket);
+    if (!user) return;
+    const id = Number(taskId);
+    try {
+      if (!Number.isInteger(id)) throw new Error('invalid task id');
+      await this.teamScope.assertTaskInTeam(user.id, id);
+    } catch {
+      socket.emit(WS_AUTH_ERROR, { message: 'No tienes acceso a esta tarea' });
+      return;
+    }
+    socket.join(`task:${id}`);
+    this.logger.log(`Socket ${socket.id} joined task room ${id}`);
   }
 
   /** Frontend: socket.emit('leave-task', taskId) */
   @SubscribeMessage('leave-task')
-  handleLeaveTask(@ConnectedSocket() socket: Socket, @MessageBody() taskId: number | string) {
-    socket.leave(`task:${taskId}`);
+  async handleLeaveTask(@ConnectedSocket() socket: Socket, @MessageBody() taskId: number | string) {
+    const user = await getSocketUser(socket);
+    if (!user) return;
+    socket.leave(`task:${Number(taskId)}`);
   }
 
   /** Emite a todos los clientes suscritos a la tarea cuando termina una medición */

@@ -2,6 +2,7 @@ import { Injectable, UnauthorizedException, BadRequestException } from '@nestjs/
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../prisma/prisma.service';
 import { PermissionsService } from '../permissions/permissions.service';
+import { SessionEventsService } from '../common/session-events.service';
 import * as bcrypt from 'bcrypt';
 
 @Injectable()
@@ -10,6 +11,7 @@ export class AuthService {
     private prisma: PrismaService,
     private jwtService: JwtService,
     private permissionsService: PermissionsService,
+    private sessionEvents: SessionEventsService,
   ) {}
 
   async validateUser(email: string, password: string): Promise<any> {
@@ -52,6 +54,9 @@ export class AuthService {
       where: { uuid: userId },
       data: { password: await bcrypt.hash(newPassword, 10), passwordChangedAt: new Date() },
     });
+    // Cierra en vivo los sockets abiertos con tokens anteriores (ambos namespaces).
+    // La sesión que hizo el cambio se reconecta con el token nuevo.
+    this.sessionEvents.revokeUserSessions(userId);
     // Reemitimos un token fresco para que la sesión que hizo el cambio siga activa
     // mientras las demás quedan invalidadas por jwt.strategy.
     return { ok: true, ...(await this.login(user)) };

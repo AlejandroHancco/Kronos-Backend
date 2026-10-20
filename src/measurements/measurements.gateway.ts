@@ -3,13 +3,16 @@ import {
   WebSocketServer,
   SubscribeMessage,
   ConnectedSocket,
-  MessageBody,
   OnGatewayInit,
   OnGatewayConnection,
   OnGatewayDisconnect,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { Injectable, Logger } from '@nestjs/common';
+import { WsAuthService } from '../auth/ws-auth.service';
+import { authenticateSocket, getSocketUser, WS_AUTH_ERROR } from '../auth/ws-socket';
+import { PASSWORD_CHANGED_MESSAGE } from '../auth/jwt-user';
+import { SessionEventsService } from '../common/session-events.service';
 
 @WebSocketGateway({
   namespace: 'measurements',
@@ -26,12 +29,26 @@ export class MeasurementsGateway
 
   @WebSocketServer() server: Server;
 
-  afterInit(server: Server) {
+  constructor(
+    private readonly wsAuth: WsAuthService,
+    private readonly sessionEvents: SessionEventsService,
+  ) {}
+
+  afterInit() {
+    // Cambio de contraseña → cerrar en vivo los sockets del usuario
+    this.sessionEvents.onUserSessionsRevoked((userId) => {
+      this.server.to(userId).emit(WS_AUTH_ERROR, { message: PASSWORD_CHANGED_MESSAGE });
+      this.server.in(userId).disconnectSockets(true);
+    });
     this.logger.log('✅ WebSocket Gateway initialized');
   }
 
-  handleConnection(socket: Socket) {
-    this.logger.log(`👤 Client connected: ${socket.id}`);
+  /** Requiere `auth: { token }` en el handshake; une al socket a su sala personal `{userId}`. */
+  async handleConnection(socket: Socket) {
+    const user = await authenticateSocket(socket, this.wsAuth, this.logger);
+    if (!user) return;
+    socket.join(user.id);
+    this.logger.log(`👤 Client connected: ${socket.id} (user ${user.id})`);
   }
 
   handleDisconnect(socket: Socket) {
@@ -39,18 +56,14 @@ export class MeasurementsGateway
   }
 
   /**
-   * Event 'join': Usuario se une a su sala personal
-   * Frontend: socket.emit('join', userId)
+   * Compatibilidad: socket.emit('join', userId). El userId del cuerpo se ignora;
+   * el socket solo puede estar en su propia sala (idempotente).
    */
   @SubscribeMessage('join')
-  handleJoin(
-    @ConnectedSocket() socket: Socket,
-    @MessageBody() userId: string,
-  ) {
-    socket.join(userId);
-    this.logger.log(
-      `✅ User ${userId} joined their room - Socket ID: ${socket.id}`,
-    );
+  async handleJoin(@ConnectedSocket() socket: Socket) {
+    const user = await getSocketUser(socket);
+    if (!user) return;
+    socket.join(user.id);
   }
 
   /**

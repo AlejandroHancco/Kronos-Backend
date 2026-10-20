@@ -49,6 +49,11 @@ export class SupabaseStrategy extends PassportStrategy(Strategy, 'supabase') {
     }
 
     const token = authHeader.split(' ')[1];
+    return this.validateToken(token);
+  }
+
+  /** Valida un token de Supabase (HTTP y WebSocket) y devuelve el usuario de la DB propia. */
+  async validateToken(token: string): Promise<NormalizedUser> {
     const payload = await this.verifyToken(token);
 
     if (!payload?.email) {
