@@ -6,6 +6,7 @@ import { MeasurementsService, MeasurementRange } from '../measurements/measureme
 import { KronosGateway } from '../gateway/kronos.gateway';
 import { MEASUREMENTS_QUEUE } from '../queue/queue.constants';
 import { PrefDevices, sharesDevice } from './device-usage';
+import { ExperimentConfigService } from '../device-plugins/experiment-config.service';
 
 /** Payload de los jobs de la cola 'measurements' */
 export interface MeasurementJobData {
@@ -68,6 +69,7 @@ export class MeasurementSchedulingService {
     private prisma: PrismaService,
     private measurementsService: MeasurementsService,
     private kronosGateway: KronosGateway,
+    private experimentConfig: ExperimentConfigService,
     @Optional()
     @InjectQueue(MEASUREMENTS_QUEUE)
     private measurementQueue?: Queue<MeasurementJobData>,
@@ -135,7 +137,7 @@ export class MeasurementSchedulingService {
         ...base,
         available: false,
         reason: 'no_preference',
-        message: 'Esta tarea no tiene un analizador y un MUX asignados. Configúralos antes de medir.',
+        message: 'Esta tarea no tiene un equipo de medición asignado. Configúralo antes de medir.',
       };
     }
 
@@ -184,6 +186,7 @@ export class MeasurementSchedulingService {
       jobId?: string;
     },
   ) {
+    await this.experimentConfig.assertChannels(taskId, params.selectedChannels);
     const check = await this.checkAvailability(taskId, params.ranges, params.selectedChannels);
     if (!check.available) {
       throw new ConflictException({

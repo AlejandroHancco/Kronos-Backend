@@ -12,6 +12,6 @@ export class FrequencyRangeDto {
 export class CreatePreferenceDto {
   @IsString() @IsNotEmpty() @MaxLength(100) name: string;
   @IsUUID() analyzerDeviceId: string;
-  @IsUUID() muxDeviceId: string;
+  @IsOptional() @IsUUID() muxDeviceId?: string | null;
   @IsArray() @ValidateNested({ each: true }) @Type(() => FrequencyRangeDto) ranges: FrequencyRangeDto[];
 }

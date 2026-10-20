@@ -62,8 +62,8 @@ export class TasksController {
 
   @Get(':id/preference')
   @RequirePermission('task:view')
-  getPreference(@Param('id', ParseIntPipe) id: number) {
-    return this.taskPreferencesService.getTaskPreference(id);
+  getPreference(@Param('id', ParseIntPipe) id: number, @Request() req: any) {
+    return this.taskPreferencesService.getTaskPreference(id, req.user.id);
   }
 
   @Post(':id/preference')
@@ -71,8 +71,9 @@ export class TasksController {
   createPreference(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: CreateTaskPreferenceDto,
+    @Request() req: any,
   ) {
-    return this.taskPreferencesService.createTaskPreference(id, dto);
+    return this.taskPreferencesService.createTaskPreference(id, dto, req.user.id);
   }
 
   @Put(':id/preference')
@@ -80,14 +81,15 @@ export class TasksController {
   updatePreference(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateTaskPreferenceDto,
+    @Request() req: any,
   ) {
-    return this.taskPreferencesService.updateTaskPreference(id, dto);
+    return this.taskPreferencesService.updateTaskPreference(id, dto, req.user.id);
   }
 
   @Delete(':id/preference')
   @RequirePermission('task:delete')
-  removePreference(@Param('id', ParseIntPipe) id: number) {
-    return this.taskPreferencesService.removeTaskPreference(id);
+  removePreference(@Param('id', ParseIntPipe) id: number, @Request() req: any) {
+    return this.taskPreferencesService.removeTaskPreference(id, req.user.id);
   }
 
   @Post(':id/measure')

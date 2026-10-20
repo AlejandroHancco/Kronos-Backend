@@ -1,6 +1,8 @@
-import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
+import { HttpException, HttpStatus, Injectable, NotFoundException } from '@nestjs/common';
 import { Device, Prisma, TaskPreference } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { TeamScopeService } from '../common/team-scope.service';
+import { ExperimentConfigService } from '../device-plugins/experiment-config.service';
 import { CreateTaskPreferenceDto } from './dto/create-task-preference.dto';
 import { UpdateTaskPreferenceDto } from './dto/update-task-preference.dto';
 
@@ -40,9 +42,14 @@ type TaskPreferenceWithDevices = TaskPreference & {
 
 @Injectable()
 export class TaskPreferencesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly teamScope: TeamScopeService,
+    private readonly experimentConfig: ExperimentConfigService,
+  ) {}
 
-  async getTaskPreference(taskId: number): Promise<TaskPreferenceResponse | null> {
+  async getTaskPreference(taskId: number, userId: string): Promise<TaskPreferenceResponse | null> {
+    await this.teamScope.assertTaskInTeam(userId, taskId);
     const preference = await this.prisma.taskPreference.findUnique({
       where: { taskId },
       include: {
@@ -60,7 +67,9 @@ export class TaskPreferencesService {
   async createTaskPreference(
     taskId: number,
     dto: CreateTaskPreferenceDto,
+    userId: string,
   ): Promise<TaskPreferenceResponse> {
+    await this.teamScope.assertTaskInTeam(userId, taskId);
     const existing = await this.prisma.taskPreference.findUnique({
       where: { taskId },
     });
@@ -72,31 +81,18 @@ export class TaskPreferencesService {
       );
     }
 
-    const analyzer = await this.prisma.device.findUnique({
-      where: { id: dto.analyzerDeviceId },
-    });
-
-    if (!analyzer) {
-      throw new HttpException(
-        'Analizador no encontrado',
-        HttpStatus.NOT_FOUND,
-      );
-    }
-
-    const mux = await this.prisma.device.findUnique({
-      where: { id: dto.muxDeviceId },
-    });
-
-    if (!mux) {
-      throw new HttpException('MUX no encontrado', HttpStatus.NOT_FOUND);
-    }
+    await this.experimentConfig.assertValidConfig(
+      taskId,
+      dto.analyzerDeviceId,
+      dto.muxDeviceId ?? null,
+    );
 
     const preference = await this.prisma.taskPreference.create({
       data: {
         taskId,
         name: dto.name,
         analyzerDeviceId: dto.analyzerDeviceId,
-        muxDeviceId: dto.muxDeviceId,
+        muxDeviceId: dto.muxDeviceId ?? null,
         ranges: {
           create: dto.ranges.map((r) => ({
             order: r.order,
@@ -122,7 +118,21 @@ export class TaskPreferencesService {
   async updateTaskPreference(
     taskId: number,
     dto: UpdateTaskPreferenceDto,
+    userId: string,
   ): Promise<TaskPreferenceResponse> {
+    await this.teamScope.assertTaskInTeam(userId, taskId);
+
+    if (dto.analyzerDeviceId !== undefined || dto.muxDeviceId !== undefined) {
+      const current = await this.prisma.taskPreference.findUnique({ where: { taskId } });
+      if (!current) {
+        throw new NotFoundException('TaskPreference no encontrada');
+      }
+      const analyzerDeviceId = dto.analyzerDeviceId ?? current.analyzerDeviceId;
+      const muxDeviceId =
+        dto.muxDeviceId !== undefined ? dto.muxDeviceId : current.muxDeviceId;
+      await this.experimentConfig.assertValidConfig(taskId, analyzerDeviceId, muxDeviceId ?? null);
+    }
+
     try {
       const { ranges, ...data } = dto;
       const preference = await this.prisma.taskPreference.update({
@@ -167,7 +177,8 @@ export class TaskPreferencesService {
     }
   }
 
-  async removeTaskPreference(taskId: number): Promise<TaskPreferenceResponse> {
+  async removeTaskPreference(taskId: number, userId: string): Promise<TaskPreferenceResponse> {
+    await this.teamScope.assertTaskInTeam(userId, taskId);
     try {
       const preference = await this.prisma.taskPreference.delete({
         where: { taskId },

@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { TeamScopeService } from '../common/team-scope.service';
 import { MeasurementSchedulingService } from '../scheduler/scheduling.service';
+import { ExperimentConfigService } from '../device-plugins/experiment-config.service';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { MeasureDto } from './dto/measure.dto';
@@ -12,6 +13,7 @@ export class TasksService {
     private prisma: PrismaService,
     private teamScope: TeamScopeService,
     private schedulingService: MeasurementSchedulingService,
+    private experimentConfig: ExperimentConfigService,
   ) {}
 
   async create(createTaskDto: CreateTaskDto, userId: string) {
@@ -94,7 +96,9 @@ export class TasksService {
 
     return {
       ...task,
-      activePreference: activePreference ? { ...activePreference } : null,
+      activePreference: activePreference
+        ? { ...activePreference, ...this.experimentConfig.summarize(activePreference) }
+        : null,
     };
   }
 

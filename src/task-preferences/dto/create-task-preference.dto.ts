@@ -48,8 +48,9 @@ export class CreateTaskPreferenceDto {
   @IsUUID()
   analyzerDeviceId: string;
 
+  @IsOptional()
   @IsUUID()
-  muxDeviceId: string;
+  muxDeviceId?: string | null;
 
   @IsNotEmpty()
   @ValidateNested({ each: true })

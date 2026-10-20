@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { TeamScopeService } from '../common/team-scope.service';
+import { ExperimentConfigService } from '../device-plugins/experiment-config.service';
 import { CreateScheduledJobDto } from './dto/create-scheduled-job.dto';
 
 @Injectable()
@@ -8,6 +9,7 @@ export class ScheduledJobsService {
   constructor(
     private prisma: PrismaService,
     private teamScope: TeamScopeService,
+    private experimentConfig: ExperimentConfigService,
   ) {}
 
   async create(createScheduledJobDto: CreateScheduledJobDto, userId: string) {
@@ -15,6 +17,7 @@ export class ScheduledJobsService {
 
     // Verificar que la tarea existe Y pertenece al equipo del usuario
     await this.teamScope.assertTaskInTeam(userId, taskId);
+    await this.experimentConfig.assertChannels(taskId, data.channelNumbers);
 
     return this.prisma.scheduledJob.create({
       data: {
