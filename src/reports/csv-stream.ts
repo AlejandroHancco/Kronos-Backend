@@ -1,14 +1,16 @@
-import type { Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import type { Response } from 'express';
 
 /** Clave de orden de una fila: (`takenAt` ASC NULLS FIRST, `id` ASC). */
 export interface StreamableRow {
   id: number;
   takenAt: Date | null;
+  /** Valor exacto de `takenAt` (µs) como texto, si la fuente lo provee (ver `pageIdsQuery`). */
+  takenAtKey?: string | null;
 }
 
 /** Clave de la última fila entregada, o `null` para la primera página. */
-export type PageCursor = { id: number; takenAt: Date | null } | null;
+export type PageCursor = { id: number; takenAt: Date | null; takenAtKey?: string | null } | null;
 
 /** Trae la siguiente página estrictamente posterior a `cursor` en el orden (takenAt NULLS FIRST, id). */
 export type FetchPage<T> = (cursor: PageCursor) => Promise<T[]>;
@@ -19,22 +21,102 @@ export type WriteChunk = (chunk: string) => Promise<void>;
 /** `true` si el cliente cortó la descarga; el bucle corta sin más consultas. */
 export type IsAborted = () => boolean;
 
+/** Filtro de tarea/rango; equivalente a `{ taskId, ...takenAtWhere(range) }` (gte/lte inclusivos). */
+export interface PageFilter {
+  taskId: number;
+  from: Date | null;
+  to: Date | null;
+}
+
 /**
- * Predicado keyset "estrictamente después de `cursor`" para el orden
- * `takenAt ASC NULLS FIRST, id ASC`. Se usa en lugar del `cursor` de Prisma porque éste, sobre
- * una columna nullable, genera un predicado que vuelve a incluir las filas con `takenAt = NULL`
- * (duplicados y bucle infinito). Se combina con `AND` al filtro de tarea/rango.
+ * Cursor keyset con el valor EXACTO almacenado de `takenAt` (TIMESTAMPTZ(6), microsegundos)
+ * como texto ISO-8601 UTC, tal como lo devuelve `pageIdsQuery`. `takenAtKey === null` = la
+ * fila cursor tenía `takenAt` NULL.
  */
-export function keysetAfter(cursor: PageCursor): Prisma.MeasurementWhereInput {
-  if (cursor === null) return {};
-  if (cursor.takenAt === null) {
-    // Aún dentro del bloque de NULLs: resto de NULLs con id mayor, luego todas las no nulas.
-    return { OR: [{ takenAt: null, id: { gt: cursor.id } }, { takenAt: { not: null } }] };
+export type SqlCursor = { id: number; takenAtKey: string | null } | null;
+
+/**
+ * Convierte el cursor del stream al de SQL. Exige `takenAtKey` cuando `takenAt` no es NULL:
+ * caer al `Date` (ms) reintroduciría el bug de precisión.
+ */
+export function toSqlCursor(cursor: PageCursor): SqlCursor {
+  if (cursor === null) return null;
+  if (cursor.takenAt === null) return { id: cursor.id, takenAtKey: null };
+  if (!cursor.takenAtKey) throw new Error(`CSV cursor ${cursor.id} lacks exact takenAt key`);
+  return { id: cursor.id, takenAtKey: cursor.takenAtKey };
+}
+
+/** Fila que devuelve `pageIdsQuery`. */
+export interface PageIdRow {
+  id: number;
+  takenAtKey: string | null;
+}
+
+/**
+ * SQL de la siguiente página de ids en el orden `takenAt ASC NULLS FIRST, id ASC`, estrictamente
+ * después de `cursor`. La comparación se hace en SQL contra el valor almacenado (no contra un
+ * `Date` de JS, que trunca a milisegundos y haría re-incluir o saltar filas con microsegundos).
+ * El cursor lleva el timestamp como texto con microsegundos (no una subconsulta por id), así una
+ * fila cursor borrada entre páginas no corta la descarga en silencio. Todo va parametrizado.
+ */
+export function pageIdsQuery(filter: PageFilter, cursor: SqlCursor, batchSize: number): Prisma.Sql {
+  const conds: Prisma.Sql[] = [Prisma.sql`m."taskId" = ${filter.taskId}`];
+  // Igual que `takenAt: { gte, lte }` de Prisma: con rango, las filas NULL quedan fuera.
+  if (filter.from) conds.push(Prisma.sql`m."takenAt" >= ${filter.from.toISOString()}::timestamptz`);
+  if (filter.to) conds.push(Prisma.sql`m."takenAt" <= ${filter.to.toISOString()}::timestamptz`);
+  if (cursor !== null) {
+    if (cursor.takenAtKey === null) {
+      // Aún dentro del bloque de NULLs: resto de NULLs con id mayor, luego todas las no nulas.
+      conds.push(Prisma.sql`((m."takenAt" IS NULL AND m.id > ${cursor.id}) OR m."takenAt" IS NOT NULL)`);
+    } else {
+      // Pasado el bloque de NULLs: nunca vuelven a entrar. Comparación de row-values exacta.
+      conds.push(
+        Prisma.sql`m."takenAt" IS NOT NULL AND (m."takenAt", m.id) > (${cursor.takenAtKey}::timestamptz, ${cursor.id})`,
+      );
+    }
   }
-  // Pasado el bloque de NULLs: nunca vuelven a entrar (ni `gt` ni la igualdad matchean NULL).
-  return {
-    OR: [{ takenAt: { gt: cursor.takenAt } }, { takenAt: cursor.takenAt, id: { gt: cursor.id } }],
-  };
+  return Prisma.sql`SELECT m.id,
+      to_char(m."takenAt" AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS "takenAtKey"
+    FROM platform.measurements m
+    WHERE ${Prisma.join(conds, ' AND ')}
+    ORDER BY m."takenAt" ASC NULLS FIRST, m.id ASC
+    LIMIT ${batchSize}`;
+}
+
+/** Reordena `rows` según `ids` (el orden que fijó la consulta SQL); omite ids ya inexistentes. */
+export function orderByIds<T extends { id: number }>(ids: number[], rows: T[]): T[] {
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  return ids.flatMap((id) => {
+    const r = byId.get(id);
+    return r ? [r] : [];
+  });
+}
+
+/**
+ * Una página keyset en dos pasos: ids ordenados en SQL (`queryIds`) y luego las filas por id
+ * (`loadRows`), reordenadas y con `takenAtKey` exacto adjunto. Si alguna fila desaparece entre
+ * ambos pasos (borrado concurrente), completa la página desde el último id de SQL, para que una
+ * página corta siga significando "no hay más" y el stream no termine antes de tiempo.
+ */
+export async function fetchKeysetPage<T extends { id: number }>(
+  queryIds: (cursor: SqlCursor, limit: number) => Promise<PageIdRow[]>,
+  loadRows: (ids: number[]) => Promise<T[]>,
+  cursor: PageCursor,
+  batchSize: number,
+): Promise<Array<T & { takenAtKey: string | null }>> {
+  const out: Array<T & { takenAtKey: string | null }> = [];
+  let sqlCursor = toSqlCursor(cursor);
+  for (;;) {
+    const need = batchSize - out.length;
+    const page = await queryIds(sqlCursor, need);
+    if (page.length === 0) return out;
+    const keys = new Map(page.map((p) => [p.id, p.takenAtKey]));
+    const ids = page.map((p) => p.id);
+    for (const r of orderByIds(ids, await loadRows(ids))) out.push({ ...r, takenAtKey: keys.get(r.id) ?? null });
+    if (page.length < need || out.length >= batchSize) return out;
+    const last = page[page.length - 1];
+    sqlCursor = { id: last.id, takenAtKey: last.takenAtKey };
+  }
 }
 
 /** Compara claves en el orden (takenAt NULLS FIRST, id). Negativo si a va antes que b. */
@@ -49,10 +131,22 @@ export function compareKeys(a: NonNullable<PageCursor>, b: NonNullable<PageCurso
 }
 
 /**
+ * `true` si la página no avanzó respecto de `cursor`: vuelve a traer la fila cursor, o su
+ * `takenAt` (en ms, la precisión de `Date`) retrocede. No se compara el id dentro del mismo
+ * milisegundo: dos filas del mismo ms con distinto microsegundo pueden ir con ids decrecientes.
+ */
+function didNotAdvance(rows: StreamableRow[], cursor: NonNullable<PageCursor>): boolean {
+  if (rows.some((r) => r.id === cursor.id)) return true;
+  const next = rows[rows.length - 1].takenAt;
+  if (cursor.takenAt === null) return false;
+  return next === null || next.getTime() < cursor.takenAt.getTime();
+}
+
+/**
  * Pagina mediciones por keyset (sin `skip` por offset: evita saltos/duplicados si se insertan o
  * eliminan filas entre páginas) y escribe cada fila como CSV, esperando backpressure
  * (`writeChunk`) y cortando temprano si el cliente abortó (`isAborted`, revisado por fila).
- * Termina cuando una página trae menos de `batchSize` filas. Lanza si la clave no avanza
+ * Termina cuando una página trae menos de `batchSize` filas. Lanza si la página no avanza
  * (guarda contra bucles infinitos). No atrapa errores de `fetchPage`/`writeChunk`: se propagan
  * al llamador, que decide cómo fallar visiblemente.
  */
@@ -77,11 +171,14 @@ export async function streamMeasurementsCsv<T extends StreamableRow>(
     }
 
     const last = rows[rows.length - 1];
-    const next = { id: last.id, takenAt: last.takenAt };
-    if (cursor !== null && compareKeys(next, cursor) <= 0) {
-      throw new Error(`CSV paging did not advance (id ${cursor.id} -> ${next.id})`);
+    if (cursor !== null && didNotAdvance(rows, cursor)) {
+      throw new Error(`CSV paging did not advance (id ${cursor.id} -> ${last.id})`);
     }
-    cursor = next;
+    cursor = {
+      id: last.id,
+      takenAt: last.takenAt,
+      ...(last.takenAtKey !== undefined ? { takenAtKey: last.takenAtKey } : {}),
+    };
 
     if (rows.length < batchSize) return;
   }

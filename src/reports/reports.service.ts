@@ -4,7 +4,9 @@ import type { Response } from 'express';
 import { PrismaService } from '../prisma/prisma.service';
 import { TeamScopeService } from '../common/team-scope.service';
 import { buildCsv, csvPreamble, rowsToCsvLines, CsvChannel, CsvMeasurement } from './measurement-csv';
-import { keysetAfter, PageCursor, streamMeasurementsCsv, writeChunk } from './csv-stream';
+import {
+  fetchKeysetPage, PageCursor, PageIdRow, pageIdsQuery, streamMeasurementsCsv, writeChunk,
+} from './csv-stream';
 
 /** Tamaño de página para el streaming de CSV de tarea; evita cargar todas las mediciones en memoria. */
 const CSV_BATCH_SIZE = 10;
@@ -259,8 +261,6 @@ export class ReportsService {
       `Generado: ${new Date().toISOString()} | Rango: ${rangeText}`,
     ]));
 
-    const where: Prisma.MeasurementWhereInput = { taskId, ...this.takenAtWhere(range) };
-
     // El cliente puede cortar la descarga a mitad de camino; `close` es la única señal fiable
     // (además de `res.destroyed`/`writableEnded`, que ya refleja algunos cierres) para dejar de
     // consultar la base de datos cuanto antes.
@@ -268,19 +268,27 @@ export class ReportsService {
     res.on('close', () => { aborted = true; });
     const isAborted = () => aborted || res.destroyed || res.writableEnded;
 
-    // Keyset manual sobre (takenAt, id): el `cursor` de Prisma re-incluye filas con takenAt NULL.
+    // Keyset en SQL sobre (takenAt, id) comparando contra el valor almacenado (µs): un `Date`
+    // de JS trunca a ms y duplicaría/saltaría filas. El filtro equivale a
+    // `{ taskId, ...takenAtWhere(range) }`. Luego se cargan las filas por id y se reordenan
+    // (fetchKeysetPage).
+    const filter = { taskId, from: range.from, to: range.to };
     const fetchPage = (cursor: PageCursor) =>
-      this.prisma.measurement.findMany({
-        where: cursor === null ? where : { AND: [where, keysetAfter(cursor)] },
-        orderBy: takenAtOrder,
-        take: CSV_BATCH_SIZE,
-        select: {
-          id: true, takenAt: true, takenByName: true, presetName: true, watcherStatus: true, data: true,
-          measurementChannels: { select: channelSelect },
-        },
-      });
+      fetchKeysetPage(
+        (sqlCursor, limit) => this.prisma.$queryRaw<PageIdRow[]>(pageIdsQuery(filter, sqlCursor, limit)),
+        (ids) =>
+          this.prisma.measurement.findMany({
+            where: { id: { in: ids } },
+            select: {
+              id: true, takenAt: true, takenByName: true, presetName: true, watcherStatus: true, data: true,
+              measurementChannels: { select: channelSelect },
+            },
+          }),
+        cursor,
+        CSV_BATCH_SIZE,
+      );
 
-    const toLines = ({ measurementChannels, ...m }: Awaited<ReturnType<typeof fetchPage>>[number]): string[] => {
+    const toLines = ({ measurementChannels, takenAtKey: _key, ...m }: Awaited<ReturnType<typeof fetchPage>>[number]): string[] => {
       const measurement: CsvMeasurement = { ...m, channels: measurementChannels.map(toCsvChannel) };
       return rowsToCsvLines(measurement);
     };
