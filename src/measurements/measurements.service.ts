@@ -254,7 +254,7 @@ export class MeasurementsService {
 
         try {
           // 4a. Cambiar canal en MUX una sola vez por canal
-          await plugin.selectChannel(taskPreference.muxDevice.ip ?? '', channel);
+          await plugin.selectChannel?.(taskPreference.muxDevice.ip ?? '', channel);
 
           // 4b. Medir todos los rangos para este canal
           const channelData: Array<[number, number, number]> = [];

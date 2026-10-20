@@ -9,45 +9,91 @@
  * requiere tocar measurements.service.ts — solo registrar un nuevo plugin.
  */
 
-/** Tabla 18 del estándar: cómo se obtienen las lecturas de un sensor. */
 export type AccessModeType = 'pull' | 'push' | 'stream';
+export type ValueType = 'double' | 'integer' | 'string' | 'boolean';
 
-/** Tabla 15 del estándar: un valor individual que produce un sensor (ej. "g", "b"). */
-export interface SensorValueMetadata {
-  name: string;
-  unit?: string;
-  type: 'double' | 'integer' | 'string' | 'boolean';
-  rangeMinimum?: number;
-  rangeMaximum?: number;
+/** Tabla 18. Kronos solo implementa 'pull' (push/stream fuera de alcance). */
+export interface AccessMode {
+  accessModeType: AccessModeType;
+  nominalUpdateInterval?: number;
+  userModifiableFrequency?: boolean;
 }
 
-/** Tabla 14 del estándar: metadata de un sensor del dispositivo. */
+/** Tabla 15: un valor que produce un sensor. `label` es extensión Kronos (texto en español para leyendas). */
+export interface SensorValueMetadata {
+  name: string;
+  unit: string;
+  type: ValueType;
+  label?: string;
+  rangeMinimum?: number;
+  rangeMaximum?: number;
+  rangeStep?: number;
+  updateFrequency?: number;
+  /** ISO-8601; lo completa GET /devices/:id/describe cuando aplica. */
+  lastMeasured?: string;
+}
+
+/** Tabla 14 */
 export interface SensorMetadata {
   sensorId: string;
   fullName: string;
   description: string;
-  protocol: 'tcp' | 'http';
+  protocol: 'tcp' | 'http' | 'simulated';
   produces: string;
   sensorValues: SensorValueMetadata[];
-  accessMode: { accessModeType: AccessModeType };
+  accessMode: AccessMode;
 }
 
-/** Tabla 19 del estándar: metadata de un actuator del dispositivo (ej. selector de canal del MUX). */
+/** Tabla 19 (valores de entrada que acepta el actuator). */
+export interface ActuatorValueMetadata {
+  name: string;
+  unit: string;
+  type: ValueType;
+  rangeMinimum?: number;
+  rangeMaximum?: number;
+  rangeStep?: number;
+}
+
+/** Tabla 19 */
 export interface ActuatorMetadata {
   actuatorId: string;
   fullName: string;
   description: string;
-  protocol: 'tcp' | 'http';
-  inputType: string;
+  protocol: 'tcp' | 'http' | 'simulated';
+  inputType: ValueType;
+  actuatorValues: ActuatorValueMetadata[];
+  accessMode: AccessMode;
 }
 
-/** "Service description" del dispositivo (4.2 del estándar), recortado a lo que usamos hoy. */
+/** Extensión Kronos: cómo se alcanza el dispositivo. */
+export interface DeviceConnection {
+  requiresIp: boolean;
+  defaultPort?: number;
+}
+
+/**
+ * Extensión Kronos: el actuator selector de canal vive en OTRO registro Device
+ * (ej. el MUX, device.type = hostDeviceType). Sin binding → el dispositivo no admite MUX.
+ */
+export interface ChannelSelectionBinding {
+  actuatorId: string;
+  hostDeviceType: string;
+  hostLabel: string;
+  required: boolean;
+  connection: DeviceConnection;
+}
+
+/** Service description (4.2). */
 export interface DeviceServiceDescription {
   deviceType: string;
+  fullName: string;
   manufacturer: string;
   description: string;
+  simulated: boolean;
+  connection: DeviceConnection;
   sensors: SensorMetadata[];
   actuators: ActuatorMetadata[];
+  channelSelection?: ChannelSelectionBinding;
 }
 
 /** Un punto medido: una frecuencia con sus valores de sensor por nombre (ej. {g, b}). */
@@ -74,9 +120,9 @@ export interface DeviceDriverPlugin {
    */
   testConnection(ip: string, deviceType: string, port?: number): Promise<boolean>;
 
-  /** "setActuatorData": selecciona el canal activo en el dispositivo de switching (ej. MUX). */
-  selectChannel(muxIp: string, channel: number): Promise<void>;
+  /** "setActuatorData" del selector de canal; obligatorio si describe().channelSelection existe. */
+  selectChannel?(muxIp: string, channel: number): Promise<void>;
 
-  /** "getSensorData": mide un rango de frecuencias en el canal ya seleccionado. */
+  /** "getSensorData": devuelve los sensorValues declarados por nombre. */
   measureChannel(params: MeasureChannelParams): Promise<MeasuredPoint[]>;
 }

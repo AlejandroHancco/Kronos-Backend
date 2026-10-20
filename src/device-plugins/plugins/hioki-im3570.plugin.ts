@@ -23,31 +23,40 @@ export class HiokiIm3570Plugin implements DeviceDriverPlugin {
   describe(): DeviceServiceDescription {
     return {
       deviceType: HiokiIm3570Plugin.DEVICE_TYPE,
+      fullName: 'Hioki IM3570 LCR Meter',
       manufacturer: 'Hioki',
-      description: 'Hioki IM3570 LCR Meter (vía MUX de switching de canales)',
-      sensors: [
-        {
-          sensorId: 'hioki-im3570-lcr',
-          fullName: 'Hioki IM3570 LCR Meter',
-          description: 'Conductancia (G) y susceptancia (B) por frecuencia',
-          protocol: 'tcp',
-          produces: 'text/csv',
-          sensorValues: [
-            { name: 'g', unit: 'S', type: 'double' },
-            { name: 'b', unit: 'S', type: 'double' },
-          ],
-          accessMode: { accessModeType: 'pull' },
-        },
-      ],
-      actuators: [
-        {
-          actuatorId: 'mux-channel-selector',
-          fullName: 'Selector de canal del MUX',
-          description: 'Activa un canal del multiplexor antes de medir',
-          protocol: 'http',
-          inputType: 'integer',
-        },
-      ],
+      description: 'Analizador de impedancia Hioki IM3570 (SCPI/TCP), con MUX de 16 canales',
+      simulated: false,
+      connection: { requiresIp: true, defaultPort: 3570 },
+      sensors: [{
+        sensorId: 'hioki-im3570-lcr',
+        fullName: 'Hioki IM3570 LCR Meter',
+        description: 'Conductancia (G) y susceptancia (B) por frecuencia',
+        protocol: 'tcp',
+        produces: 'text/csv',
+        // Sin rango fijo: depende del rango de medición del instrumento.
+        sensorValues: [
+          { name: 'g', unit: 'S', type: 'double', label: 'Conductancia' },
+          { name: 'b', unit: 'S', type: 'double', label: 'Susceptancia' },
+        ],
+        accessMode: { accessModeType: 'pull' },
+      }],
+      actuators: [{
+        actuatorId: 'mux-channel-selector',
+        fullName: 'Selector de canal del MUX',
+        description: 'Activa un canal del multiplexor antes de medir',
+        protocol: 'http',
+        inputType: 'integer',
+        actuatorValues: [{ name: 'channel', unit: '', type: 'integer', rangeMinimum: 1, rangeMaximum: 16, rangeStep: 1 }],
+        accessMode: { accessModeType: 'pull' },
+      }],
+      channelSelection: {
+        actuatorId: 'mux-channel-selector',
+        hostDeviceType: HiokiIm3570Plugin.MUX_DEVICE_TYPE,
+        hostLabel: 'MUX de canales',
+        required: true,
+        connection: { requiresIp: true },
+      },
     };
   }
 
