@@ -6,6 +6,7 @@ import {
   DeviceServiceDescription,
 } from './device-plugin.interface';
 import { HiokiIm3570Plugin } from './plugins/hioki-im3570.plugin';
+import { SimulatedImpedancePlugin } from './plugins/simulated-impedance.plugin';
 
 /**
  * Registro de plugins de dispositivo por `deviceType` (coincide con `device.type` en DB).
@@ -34,10 +35,14 @@ interface Registered {
 export class DevicePluginRegistry implements OnModuleInit {
   private readonly types = new Map<string, Registered>();
 
-  constructor(private readonly hiokiPlugin: HiokiIm3570Plugin) {}
+  constructor(
+    private readonly hiokiPlugin: HiokiIm3570Plugin,
+    private readonly simPlugin: SimulatedImpedancePlugin,
+  ) {}
 
   onModuleInit() {
     this.register(this.hiokiPlugin);
+    this.register(this.simPlugin);
   }
 
   /** Registra el tipo del plugin y, si declara selector de canal, el tipo del dispositivo que lo aloja (ej. 'mux'). */

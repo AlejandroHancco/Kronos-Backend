@@ -1,6 +1,7 @@
 import { Global, Module } from '@nestjs/common';
 import { DevicePluginRegistry } from './device-plugin.registry';
 import { HiokiIm3570Plugin } from './plugins/hioki-im3570.plugin';
+import { SimulatedImpedancePlugin } from './plugins/simulated-impedance.plugin';
 
 /**
  * Módulo del Kronos Watcher dedicado a dispositivos: registra los plugins de cada
@@ -10,7 +11,7 @@ import { HiokiIm3570Plugin } from './plugins/hioki-im3570.plugin';
  */
 @Global()
 @Module({
-  providers: [HiokiIm3570Plugin, DevicePluginRegistry],
+  providers: [HiokiIm3570Plugin, SimulatedImpedancePlugin, DevicePluginRegistry],
   exports: [DevicePluginRegistry],
 })
 export class DevicePluginsModule {}

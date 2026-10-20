@@ -1,5 +1,6 @@
 import { DevicePluginRegistry } from './device-plugin.registry';
 import { HiokiIm3570Plugin } from './plugins/hioki-im3570.plugin';
+import { SimulatedImpedancePlugin } from './plugins/simulated-impedance.plugin';
 import { DeviceDriverPlugin, DeviceServiceDescription } from './device-plugin.interface';
 
 const fake = (d: Partial<DeviceServiceDescription>): DeviceDriverPlugin => ({
@@ -13,7 +14,7 @@ const fake = (d: Partial<DeviceServiceDescription>): DeviceDriverPlugin => ({
 
 describe('DevicePluginRegistry', () => {
   const build = () => {
-    const r = new DevicePluginRegistry(new HiokiIm3570Plugin());
+    const r = new DevicePluginRegistry(new HiokiIm3570Plugin(), new SimulatedImpedancePlugin());
     r.onModuleInit();
     return r;
   };
@@ -52,5 +53,10 @@ describe('DevicePluginRegistry', () => {
 
   it('get() de un tipo desconocido lanza NotFound', () => {
     expect(() => build().get('nope')).toThrow(/No hay un device plugin/);
+  });
+
+  it('incluye el plugin simulado como sensor sin IP', () => {
+    const sim = build().catalog().find((e) => e.deviceType === 'sim-impedance')!;
+    expect(sim).toMatchObject({ role: 'sensor', simulated: true, connection: { requiresIp: false }, channelSelection: null });
   });
 });
