@@ -40,4 +40,28 @@ describe('parseServiceDescription', () => {
     d.channelSelector = { actuatorId: 'sel', valueName: 'channel' };
     expect(() => parseServiceDescription(d, 'demo')).toThrow(/entero/);
   });
+  it('rechaza configuration con nombres de parámetros duplicados', () => {
+    const d: any = valid();
+    d.configuration = [
+      { name: 'param1', label: 'P1', type: 'double', unit: 'Ω', default: 1, access: 'read-write', storage: 'persisted' },
+      { name: 'param1', label: 'P1b', type: 'string', unit: '', default: 'x', access: 'read-write', storage: 'persisted' }
+    ];
+    expect(() => parseServiceDescription(d, 'demo')).toThrow(/configuration\[1\]\.name.*nombre de parámetro repetido "param1"/);
+    expect(() => parseServiceDescription(d, 'demo')).toThrow(/service-description\.json de "demo"/);
+  });
+  it('rechaza configuration con allowedValues de tipo inválido', () => {
+    const d: any = valid();
+    d.configuration = [
+      { name: 'param', label: 'P', type: 'double', unit: 'Ω', allowedValues: [1, 2, {}], default: 1, access: 'read-write', storage: 'persisted' }
+    ];
+    expect(() => parseServiceDescription(d, 'demo')).toThrow(/configuration\[0\]\.allowedValues\[2\]/);
+    expect(() => parseServiceDescription(d, 'demo')).toThrow(/service-description\.json de "demo"/);
+  });
+  it('rechaza configuration con allowedValues NaN o Infinity', () => {
+    const d: any = valid();
+    d.configuration = [
+      { name: 'param', label: 'P', type: 'double', unit: 'Ω', allowedValues: [1, NaN], default: 1, access: 'read-write', storage: 'persisted' }
+    ];
+    expect(() => parseServiceDescription(d, 'demo')).toThrow(/configuration\[0\]\.allowedValues\[1\]/);
+  });
 });

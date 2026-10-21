@@ -176,7 +176,16 @@ function configurationParameter(path: string, v: unknown): ConfigurationParamete
   if (o.rangeMinimum !== undefined) out.rangeMinimum = num(`${path}.rangeMinimum`, o.rangeMinimum);
   if (o.rangeMaximum !== undefined) out.rangeMaximum = num(`${path}.rangeMaximum`, o.rangeMaximum);
   if (o.rangeStep !== undefined) out.rangeStep = num(`${path}.rangeStep`, o.rangeStep);
-  if (o.allowedValues !== undefined) out.allowedValues = arr(`${path}.allowedValues`, o.allowedValues) as Array<string | number>;
+  if (o.allowedValues !== undefined) {
+    const allowedValues = arr(`${path}.allowedValues`, o.allowedValues);
+    for (let i = 0; i < allowedValues.length; i++) {
+      const val = allowedValues[i];
+      if (typeof val !== 'string' && (typeof val !== 'number' || !Number.isFinite(val))) {
+        fail(`${path}.allowedValues[${i}]`, 'debe ser un texto o un número');
+      }
+    }
+    out.allowedValues = allowedValues as Array<string | number>;
+  }
 
   const namedPath = `${path} (${name})`;
   if (storage === 'fixed' && access !== 'read-only') {
@@ -210,6 +219,13 @@ function parseDescription(raw: unknown): DeviceServiceDescription {
   const sensors = arr('sensors', o.sensors).map((s, i) => sensor(`sensors[${i}]`, s, usedValueNames));
   const actuators = arr('actuators', o.actuators).map((a, i) => actuator(`actuators[${i}]`, a));
   const configuration = arr('configuration', o.configuration ?? []).map((c, i) => configurationParameter(`configuration[${i}]`, c));
+
+  const usedParameterNames = new Set<string>();
+  for (let i = 0; i < configuration.length; i++) {
+    const param = configuration[i];
+    if (usedParameterNames.has(param.name)) fail(`configuration[${i}].name`, `nombre de parámetro repetido "${param.name}"`);
+    usedParameterNames.add(param.name);
+  }
 
   const out: DeviceServiceDescription = {
     deviceType,
