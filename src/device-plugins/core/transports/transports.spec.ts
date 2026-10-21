@@ -69,4 +69,45 @@ describe('transports', () => {
     await expect(s.readLine(500)).resolves.toBe('b');
     s.close(); srv.close();
   });
+
+  it('el servidor cierra la conexión tras recibir la consulta: query rechaza rápido con un error que no es de timeout', async () => {
+    const server = net.createServer((s) => {
+      s.on('data', () => s.destroy());
+    });
+    const port = await new Promise<number>((resolve) =>
+      server.listen(0, '127.0.0.1', () => resolve((server.address() as net.AddressInfo).port)));
+    const t = await RawTcpScpi.open('127.0.0.1', port);
+    const start = Date.now();
+    await expect(t.query('*IDN?', 5000)).rejects.not.toThrow('Tiempo de espera agotado');
+    expect(Date.now() - start).toBeLessThan(1000);
+    t.close();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+
+  it('tras un query con timeout, una segunda consulta rechaza (conexión inutilizable)', async () => {
+    const srv = await fakeServer(() => null);
+    const t = await RawTcpScpi.open('127.0.0.1', srv.port);
+    await expect(t.query('*OPC?', 50)).rejects.toThrow('Tiempo de espera agotado');
+    await expect(t.query('*OPC?', 500)).rejects.toThrow();
+    t.close(); srv.close();
+  });
+
+  it('readLine concurrente rechaza con "Ya hay una lectura en curso"', async () => {
+    const srv = await fakeServer(() => null);
+    const s = await LineSocket.open('127.0.0.1', srv.port);
+    const first = s.readLine(500);
+    await expect(s.readLine(500)).rejects.toThrow('Ya hay una lectura en curso');
+    s.close();
+    await expect(first).rejects.toThrow();
+    srv.close();
+  });
+
+  it('close() mientras una consulta está pendiente la rechaza de inmediato', async () => {
+    const srv = await fakeServer(() => null);
+    const s = await LineSocket.open('127.0.0.1', srv.port);
+    const pending = s.readLine(5000);
+    s.close();
+    await expect(pending).rejects.toThrow();
+    srv.close();
+  });
 });

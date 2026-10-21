@@ -1,6 +1,7 @@
 import { HiokiIm3570Plugin } from './hioki-im3570.plugin';
 import { effectiveConfiguration } from '../../core/configuration';
 import type { ScpiTransport } from '../../core/transports/scpi-transport';
+import { RawTcpScpi } from '../../core/transports/raw-tcp-scpi';
 
 /** Transporte falso que registra write/query y permite forzar un rechazo en query. */
 function fakeTransport(opts: { queryResult?: string; queryError?: Error } = {}) {
@@ -108,6 +109,14 @@ describe('HiokiIm3570Plugin', () => {
       { x: 10000, values: { g: 1.6, b: 2.6 } },
     ]);
     expect(isClosed()).toBe(true);
+  });
+
+  it('openTransport abre RawTcpScpi con las opciones fijadas (puerto, terminador, demora de escritura, timeout de conexión)', async () => {
+    const openSpy = jest.spyOn(RawTcpScpi, 'open').mockResolvedValue({ write: jest.fn(), query: jest.fn(), close: jest.fn() } as unknown as RawTcpScpi);
+
+    await plugin.openTransport('10.0.0.5');
+
+    expect(openSpy).toHaveBeenCalledWith('10.0.0.5', 3570, { terminator: '\r\n', writeDelayMs: 100, connectTimeoutMs: 5000 });
   });
 
   it('getSensorData cierra el transporte aunque query rechace', async () => {

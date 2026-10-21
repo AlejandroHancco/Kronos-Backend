@@ -2,17 +2,19 @@ import * as net from 'net';
 
 export interface LineSocketOptions { connectTimeoutMs?: number; terminator?: '\n' | '\r\n' }
 
+interface PendingRead { resolve: (line: string) => void; reject: (err: Error) => void; timer: NodeJS.Timeout }
+
 /** Socket TCP orientado a líneas: lectura hasta \n (ignorando \r), con cola de líneas y timeouts por lectura. */
 export class LineSocket {
   private buffer = '';
   private lines: string[] = [];
-  private waiter: ((line: string) => void) | null = null;
+  private waiter: PendingRead | null = null;
   private failure: Error | null = null;
 
   private constructor(private readonly socket: net.Socket, readonly terminator: string) {
     socket.on('data', (chunk) => this.onData(chunk));
-    socket.on('error', (e) => (this.failure = e));
-    socket.on('close', () => (this.failure ??= new Error('Conexión cerrada por el dispositivo')));
+    socket.on('error', (e) => this.fail(e));
+    socket.on('close', () => this.fail(this.failure ?? new Error('Conexión cerrada por el dispositivo')));
   }
 
   static open(host: string, port: number, opts: LineSocketOptions = {}): Promise<LineSocket> {
@@ -20,8 +22,13 @@ export class LineSocket {
     return new Promise((resolve, reject) => {
       const socket = net.createConnection({ host, port });
       const timer = setTimeout(() => { socket.destroy(); reject(new Error(`Tiempo de espera agotado conectando a ${host}:${port}`)); }, connectTimeoutMs);
-      socket.once('connect', () => { clearTimeout(timer); resolve(new LineSocket(socket, terminator)); });
-      socket.once('error', (e) => { clearTimeout(timer); socket.destroy(); reject(e); });
+      const onConnectError = (e: Error) => { clearTimeout(timer); socket.destroy(); reject(e); };
+      socket.once('error', onConnectError);
+      socket.once('connect', () => {
+        clearTimeout(timer);
+        socket.removeListener('error', onConnectError);
+        resolve(new LineSocket(socket, terminator));
+      });
     });
   }
 
@@ -31,17 +38,34 @@ export class LineSocket {
   }
 
   readLine(timeoutMs: number): Promise<string> {
+    if (this.waiter) return Promise.reject(new Error('Ya hay una lectura en curso'));
     const queued = this.lines.shift();
     if (queued !== undefined) return Promise.resolve(queued);
     if (this.failure) return Promise.reject(this.failure);
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { this.waiter = null; reject(new Error('Tiempo de espera agotado esperando respuesta')); }, timeoutMs);
-      this.waiter = (line) => { clearTimeout(timer); resolve(line); };
+      const timer = setTimeout(() => {
+        this.waiter = null;
+        this.failure = new Error('Tiempo de espera agotado esperando respuesta');
+        this.socket.destroy();
+        reject(this.failure);
+      }, timeoutMs);
+      this.waiter = { resolve, reject, timer };
     });
   }
 
   close(): void {
     this.socket.destroy();
+  }
+
+  /** Rechaza la lectura pendiente (si hay) y recuerda el primer error ocurrido. */
+  private fail(error: Error): void {
+    this.failure ??= error;
+    if (this.waiter) {
+      const w = this.waiter;
+      this.waiter = null;
+      clearTimeout(w.timer);
+      w.reject(this.failure);
+    }
   }
 
   private onData(chunk: Buffer): void {
@@ -50,7 +74,14 @@ export class LineSocket {
     while ((i = this.buffer.indexOf('\n')) >= 0) {
       const line = this.buffer.slice(0, i);
       this.buffer = this.buffer.slice(i + 1);
-      if (this.waiter) { const w = this.waiter; this.waiter = null; w(line); } else this.lines.push(line);
+      if (this.waiter) {
+        const w = this.waiter;
+        this.waiter = null;
+        clearTimeout(w.timer);
+        w.resolve(line);
+      } else {
+        this.lines.push(line);
+      }
     }
   }
 }
