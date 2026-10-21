@@ -7,7 +7,6 @@ import { KronosGateway } from '../gateway/kronos.gateway';
 import { NotificationsService } from '../notifications/notifications.service';
 import { classifyMeasurement, MeasurementClassification } from './kronos-watcher';
 import { ExperimentConfigService } from '../device-plugins/core/experiment-config.service';
-import { channelSelectionError } from '../device-plugins/core/experiment-config';
 import type { MeasuredPoint } from '../device-plugins/core/device-plugin.interface';
 import { CreateMeasurementDto } from './dto/create-measurement.dto';
 import { buildMeasurementData, ChannelResult, parseSensorValues, postedMeasurementError, storedPointsOf } from './measurement-data';
@@ -211,20 +210,15 @@ export class MeasurementsService {
           (a, b) => a - b,
       );
 
-      // 1. Experimento activo (devices + plugin + rango de canales) — valida canales contra lo declarado
-      const { preference: taskPreference, plugin, description, channelRange, valueMetas } =
+      // 1. Experimento activo (sensor + selector opcional + rango de canales) — valida canales contra lo declarado
+      const { preference: taskPreference, sensor, selector, channelRange, valueMetas } =
           await this.experimentConfig.assertChannels(taskId, uniqueChannels);
       const mux = taskPreference.muxDevice;
       const valueNames = valueMetas.map((v) => v.name);
-      deviceNames = [taskPreference.analyzerDevice.name, mux?.name].filter((n): n is string => !!n);
-
-      // MUX configurado pero el equipo no sabe seleccionar canal → error claro antes de medir
-      const muxError = channelSelectionError(!!mux, description, plugin);
-      if (muxError) throw new BadRequestException(muxError);
-      const selectChannel = mux ? plugin.selectChannel!.bind(plugin) : null;
+      deviceNames = [sensor.context.name, selector?.context.name].filter((n): n is string => !!n);
 
       this.logger.log(
-          `Experiment - Sensor: ${taskPreference.analyzerDevice.name} (${taskPreference.analyzerDevice.type}), MUX: ${mux?.ip ?? 'sin MUX'}, canales ${channelRange.min}-${channelRange.max}, valores [${valueNames.join(', ')}]`,
+          `Experiment - Sensor: ${sensor.context.name} (${taskPreference.analyzerDevice.type}), selector: ${selector ? `${selector.context.name} (${mux?.type})` : 'sin selector'}, canales ${channelRange.min}-${channelRange.max}, valores [${valueNames.join(', ')}]`,
       );
 
       this.logger.log(
@@ -252,19 +246,15 @@ export class MeasurementsService {
         const channel = uniqueChannels[index];
 
         try {
-          // 3a. Seleccionar canal solo si la configuración tiene MUX (selector de canal declarado)
-          if (mux && selectChannel) await selectChannel(mux.ip ?? '', channel);
+          // 3a. Activar el canal en el selector (setActuatorData) si la configuración tiene uno
+          if (selector) {
+            await selector.plugin.setActuatorData(selector.context, selector.actuatorId, { [selector.valueName]: channel });
+          }
 
-          // 3b. Medir todos los rangos para este canal
+          // 3b. Medir todos los rangos para este canal (getSensorData del equipo de medición)
           const points: MeasuredPoint[] = [];
           for (const range of params.ranges) {
-            points.push(...await plugin.measureChannel({
-              analyzerIp: taskPreference.analyzerDevice.ip ?? '',
-              startFreq: range.startFreq,
-              stopFreq: range.stopFreq,
-              points: range.points,
-              sweepType: range.sweepType,
-            }));
+            points.push(...await sensor.plugin.getSensorData(sensor.context, range));
           }
 
           this.logger.log(

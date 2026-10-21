@@ -1,0 +1,38 @@
+{
+  "deviceType": "kronos-mux-16",
+  "fullName": "MUX Kronos de 16 canales",
+  "shortName": "MUX Kronos 16",
+  "manufacturer": "Kronos",
+  "description": "Multiplexor de 16 canales del sistema Kronos (HTTP): conecta un canal a la vez al equipo de medición",
+  "simulated": false,
+  "connection": { "requiresIp": true },
+  "sensors": [],
+  "actuators": [
+    {
+      "actuatorId": "kronos-mux-16-channel",
+      "fullName": "Selector de canal del MUX",
+      "description": "Activa un canal del multiplexor antes de medir (GET /?orden=<canal>)",
+      "protocol": "http",
+      "inputType": "integer",
+      "actuatorValues": [
+        { "name": "channel", "unit": "", "type": "integer", "rangeMinimum": 1, "rangeMaximum": 16, "rangeStep": 1 }
+      ],
+      "accessMode": { "accessModeType": "pull" }
+    }
+  ],
+  "channelSelector": { "actuatorId": "kronos-mux-16-channel", "valueName": "channel" },
+  "configuration": [
+    {
+      "name": "channel",
+      "label": "Canal activo",
+      "description": "Último canal activado por Kronos desde que inició el backend; el MUX no permite leerlo",
+      "type": "integer",
+      "unit": "",
+      "rangeMinimum": 1,
+      "rangeMaximum": 16,
+      "rangeStep": 1,
+      "access": "read-write",
+      "storage": "live"
+    }
+  ]
+}

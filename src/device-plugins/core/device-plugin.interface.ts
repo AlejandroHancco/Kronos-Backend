@@ -2,11 +2,12 @@
  * Contratos de "device plugin" inspirados directamente en IEEE Std 1876-2019
  * (Lab as a Service / LaaS), sección 4 — "First layer of standardization: LaaS".
  *
- * Cada dispositivo soportado por el Kronos Watcher implementa `DeviceDriverPlugin`.
- * measurements.service.ts nunca habla TCP/HTTP directamente con el hardware: resuelve
- * el plugin correspondiente al `device.type` vía `DevicePluginRegistry` y lo invoca a
- * través de esta interfaz. Así, agregar un dispositivo nuevo (type != 'analyzer') no
- * requiere tocar measurements.service.ts — solo registrar un nuevo plugin.
+ * Cada modelo de dispositivo soportado por el Kronos Watcher es un plugin en
+ * `plugins/<deviceType>/` con su `service-description.json`. Las capacidades están separadas:
+ *   - `SensorPlugin`   → "getSensorData" (Tablas 14/15): mide y devuelve los sensorValues declarados;
+ *   - `ActuatorPlugin` → "setActuatorData" (Tabla 19): por ahora, el selector de canal (MUX).
+ * measurements.service.ts nunca habla TCP/HTTP con el hardware: resuelve el plugin del sensor
+ * y el del selector por `device.type` vía `DevicePluginRegistry`.
  *
  * Correspondencia con IEEE 1876-2019 (capa 1, cláusula 4):
  *   - SensorMetadata        → Tabla 14 (sensor)
@@ -16,8 +17,8 @@
  *   - ActuatorValueMetadata → parte de la Tabla 19 (valores de entrada del actuator)
  *
  * Extensiones propias de Kronos (NO forman parte del estándar):
- *   - `simulated`, `connection` (DeviceConnection) y `channelSelection` (ChannelSelectionBinding)
- *     en DeviceServiceDescription;
+ *   - `shortName`, `simulated`, `connection` (DeviceConnection), `channelSelector`
+ *     (ChannelSelectorMetadata) y `configuration` en DeviceServiceDescription;
  *   - `fullName` a nivel superior de DeviceServiceDescription;
  *   - `label` en SensorValueMetadata (texto en español para leyendas);
  *   - `lastMeasured` es una aproximación: GET /devices/:id/describe lo deriva de la última
@@ -87,18 +88,6 @@ export interface DeviceConnection {
   defaultPort?: number;
 }
 
-/**
- * Extensión Kronos: el actuator selector de canal vive en OTRO registro Device
- * (ej. el MUX, device.type = hostDeviceType). Sin binding → el dispositivo no admite MUX.
- */
-export interface ChannelSelectionBinding {
-  actuatorId: string;
-  hostDeviceType: string;
-  hostLabel: string;
-  required: boolean;
-  connection: DeviceConnection;
-}
-
 /** Extensión Kronos: qué valor de qué actuator selecciona el canal (entero, con rango ≥ 1). */
 export interface ChannelSelectorMetadata {
   actuatorId: string;
@@ -133,18 +122,17 @@ export interface DeviceServiceDescription {
   deviceType: string;
   fullName: string;
   /** Extensión Kronos: nombre corto para catálogos y UI. */
-  shortName?: string;
+  shortName: string;
   manufacturer: string;
   description: string;
   simulated: boolean;
   connection: DeviceConnection;
   sensors: SensorMetadata[];
   actuators: ActuatorMetadata[];
-  channelSelection?: ChannelSelectionBinding;
   /** Extensión Kronos: qué actuator/valor selecciona el canal. */
   channelSelector?: ChannelSelectorMetadata;
   /** Extensión Kronos: parámetros configurables del dispositivo. */
-  configuration?: ConfigurationParameterMetadata[];
+  configuration: ConfigurationParameterMetadata[];
 }
 
 /** Instancia concreta de dispositivo (fila `devices`) que recibe un plugin. */
@@ -161,27 +149,51 @@ export interface MeasuredPoint {
   values: Record<string, number>;
 }
 
-export interface MeasureChannelParams {
-  analyzerIp: string;
+/** Rol de un tipo de dispositivo, derivado de sus capacidades (ver `roleOf` en el registry). */
+export type DeviceRole = 'sensor' | 'channel-selector';
+
+/** Destino de un chequeo de conectividad. */
+export interface ConnectionTarget {
+  ip: string | null;
+  port?: number;
+}
+
+/** Un barrido de frecuencia que el sensor ejecuta. */
+export interface SweepParams {
   startFreq: number;
   stopFreq: number;
   points: number;
   sweepType: string;
 }
 
-export interface DeviceDriverPlugin {
+export interface DevicePlugin {
   describe(): DeviceServiceDescription;
 
-  /**
-   * Equivalente a un chequeo de conectividad (usado también por el health check periódico).
-   * `deviceType` distingue el sub-rol cuando un mismo plugin cubre más de un `device.type`
-   * (ej. HiokiIm3570Plugin resuelve tanto "analyzer" como "mux").
-   */
-  testConnection(ip: string, deviceType: string, port?: number): Promise<boolean>;
+  /** Chequeo de conectividad (usado también por el health check periódico). */
+  testConnection(target: ConnectionTarget): Promise<boolean>;
 
-  /** "setActuatorData" del selector de canal; obligatorio si describe().channelSelection existe. */
-  selectChannel?(muxIp: string, channel: number): Promise<void>;
+  /** Reglas entre campos de la configuración efectiva; `null` si es válida. */
+  validateConfiguration?(effective: ConfigurationValues): string | null;
 
-  /** "getSensorData": devuelve los sensorValues declarados por nombre. */
-  measureChannel(params: MeasureChannelParams): Promise<MeasuredPoint[]>;
+  /** Lee los parámetros `live` del dispositivo (`null` = desconocido). Obligatorio si declara alguno. */
+  readLiveConfiguration?(device: DeviceContext): Promise<Record<string, ConfigurationValue | null>>;
+
+  /** Aplica parámetros `live` en el dispositivo. Obligatorio si declara alguno. */
+  applyLiveConfiguration?(device: DeviceContext, values: ConfigurationValues): Promise<void>;
 }
+
+/** Capacidad "getSensorData" (Tablas 14/15): devuelve los sensorValues declarados por nombre. */
+export interface SensorPlugin extends DevicePlugin {
+  getSensorData(device: DeviceContext, sweep: SweepParams): Promise<MeasuredPoint[]>;
+}
+
+/** Capacidad "setActuatorData" (Tabla 19). */
+export interface ActuatorPlugin extends DevicePlugin {
+  setActuatorData(device: DeviceContext, actuatorId: string, values: Record<string, number>): Promise<void>;
+}
+
+export const isSensorPlugin = (p: DevicePlugin): p is SensorPlugin =>
+  typeof (p as SensorPlugin).getSensorData === 'function';
+
+export const isActuatorPlugin = (p: DevicePlugin): p is ActuatorPlugin =>
+  typeof (p as ActuatorPlugin).setActuatorData === 'function';

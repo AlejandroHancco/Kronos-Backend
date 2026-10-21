@@ -178,7 +178,7 @@ export class DevicesService {
     if (!this.devicePlugins.has(type)) return false;
     const entry = this.devicePlugins.catalog().find((e) => e.deviceType === type)!;
     if (entry.connection.requiresIp && !ip) return false;
-    return this.devicePlugins.get(type).testConnection(ip ?? '', type, port ?? entry.connection.defaultPort);
+    return this.devicePlugins.get(type).testConnection({ ip, port: port ?? entry.connection.defaultPort });
   }
 
   /** Service description (IEEE 1876 §4.2) + metadata de instancia para un dispositivo del equipo del usuario. */

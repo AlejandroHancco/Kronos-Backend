@@ -1,0 +1,73 @@
+{
+  "deviceType": "sim-impedance",
+  "fullName": "Impedancímetro simulado (Randles)",
+  "shortName": "Simulador (Randles)",
+  "manufacturer": "Kronos (simulación)",
+  "description": "SIMULADO: genera |Z|(f) de un modelo Rs + (Rp ‖ C) con ruido; no requiere hardware ni MUX",
+  "simulated": true,
+  "connection": { "requiresIp": false },
+  "sensors": [
+    {
+      "sensorId": "sim-impedance-z",
+      "fullName": "Módulo de impedancia simulado",
+      "description": "Módulo de la impedancia |Z| por frecuencia (simulado)",
+      "protocol": "simulated",
+      "produces": "application/json",
+      "sensorValues": [
+        { "name": "z", "unit": "Ω", "type": "double", "label": "Módulo de impedancia |Z|", "rangeMinimum": 0, "rangeMaximum": 1000000 }
+      ],
+      "accessMode": { "accessModeType": "pull" }
+    }
+  ],
+  "actuators": [],
+  "configuration": [
+    {
+      "name": "rs",
+      "label": "Resistencia en serie (Rs)",
+      "description": "Resistencia de la solución en el modelo de Randles",
+      "type": "double",
+      "unit": "Ω",
+      "rangeMinimum": 0,
+      "rangeMaximum": 100000,
+      "default": 150,
+      "access": "read-write",
+      "storage": "persisted"
+    },
+    {
+      "name": "rp",
+      "label": "Resistencia en paralelo (Rp)",
+      "description": "Resistencia de transferencia de carga en el modelo de Randles",
+      "type": "double",
+      "unit": "Ω",
+      "rangeMinimum": 1,
+      "rangeMaximum": 800000,
+      "default": 20000,
+      "access": "read-write",
+      "storage": "persisted"
+    },
+    {
+      "name": "c",
+      "label": "Capacitancia (C)",
+      "description": "Capacitancia de doble capa en el modelo de Randles",
+      "type": "double",
+      "unit": "nF",
+      "rangeMinimum": 0.001,
+      "rangeMaximum": 1000000,
+      "default": 2,
+      "access": "read-write",
+      "storage": "persisted"
+    },
+    {
+      "name": "noisePercent",
+      "label": "Ruido",
+      "description": "Ruido multiplicativo uniforme aplicado a |Z|",
+      "type": "double",
+      "unit": "%",
+      "rangeMinimum": 0,
+      "rangeMaximum": 10,
+      "default": 0.5,
+      "access": "read-write",
+      "storage": "persisted"
+    }
+  ]
+}

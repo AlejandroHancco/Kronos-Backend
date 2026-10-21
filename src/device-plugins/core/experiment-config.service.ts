@@ -2,9 +2,9 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { Device, TaskPreference, TaskPreferenceRange } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { DevicePluginRegistry } from './device-plugin.registry';
-import { DeviceDriverPlugin, DeviceServiceDescription } from './device-plugin.interface';
+import type { ActuatorPlugin, DeviceContext, DeviceServiceDescription, SensorPlugin } from './device-plugin.interface';
+import { toDeviceContext } from './configuration';
 import {
-  CHANNEL_SLOTS,
   ChannelRange,
   MeasurementValueMeta,
   channelRangeFor,
@@ -16,11 +16,20 @@ import {
 
 export interface ResolvedExperiment {
   preference: TaskPreference & { analyzerDevice: Device; muxDevice: Device | null; ranges: TaskPreferenceRange[] };
-  plugin: DeviceDriverPlugin;
-  description: DeviceServiceDescription;
+  sensor: { plugin: SensorPlugin; description: DeviceServiceDescription; context: DeviceContext };
+  selector: {
+    plugin: ActuatorPlugin;
+    description: DeviceServiceDescription;
+    context: DeviceContext;
+    actuatorId: string;
+    valueName: string;
+  } | null;
   channelRange: ChannelRange;
   valueMetas: MeasurementValueMeta[];
 }
+
+const mismatch = (d: { name: string; type: string | null }, what: string) =>
+  `La configuración de la tarea usa "${d.name}" (tipo "${d.type}"), que no es ${what} registrado; revisa la configuración`;
 
 @Injectable()
 export class ExperimentConfigService {
@@ -35,24 +44,52 @@ export class ExperimentConfigService {
     if (muxDeviceId && !mux) throw new NotFoundException('MUX no encontrado');
     const sensorRole = this.registry.role(sensor.type);
     const error = experimentConfigError({
-      taskProjectId: task.projectId, sensor, mux, sensorRole,
-      description: sensorRole === 'sensor' ? this.registry.describe(sensor.type!) : undefined,
+      taskProjectId: task.projectId,
+      sensor,
+      selector: mux,
+      sensorRole,
+      selectorRole: mux ? this.registry.role(mux.type) : undefined,
+      sensorDescription: sensorRole === 'sensor' ? this.registry.describe(sensor.type!) : undefined,
     });
     if (error) throw new BadRequestException(error);
   }
 
+  /** Experimento activo de la tarea: plugin y contexto del sensor y, si hay, del selector de canal. */
   async resolve(taskId: number): Promise<ResolvedExperiment | null> {
     const preference = await this.prisma.taskPreference.findFirst({
       where: { taskId }, orderBy: { createdAt: 'desc' },
       include: { analyzerDevice: true, muxDevice: true, ranges: { orderBy: { order: 'asc' } } },
     });
     if (!preference) return null;
-    const plugin = this.registry.get(preference.analyzerDevice.type); // 404 si el tipo no tiene plugin
-    const description = plugin.describe();
+    const s = preference.analyzerDevice;
+    const m = preference.muxDevice;
+    if (this.registry.role(s.type) !== 'sensor') throw new BadRequestException(mismatch(s, 'un equipo de medición'));
+    if (m && this.registry.role(m.type) !== 'channel-selector') throw new BadRequestException(mismatch(m, 'un selector de canal'));
+
+    const sensorDescription = this.registry.describe(s.type!);
+    const sensor = {
+      plugin: this.registry.sensor(s.type),
+      description: sensorDescription,
+      context: toDeviceContext(s, sensorDescription),
+    };
+    let selector: ResolvedExperiment['selector'] = null;
+    if (m) {
+      const cs = this.registry.channelSelector(m.type);
+      const description = this.registry.describe(m.type!);
+      selector = {
+        plugin: cs.plugin,
+        description,
+        context: toDeviceContext(m, description),
+        actuatorId: cs.actuatorId,
+        valueName: cs.valueName,
+      };
+    }
     return {
-      preference, plugin, description,
-      channelRange: channelRangeFor(description, !!preference.muxDevice),
-      valueMetas: valueMetasOf(description),
+      preference,
+      sensor,
+      selector,
+      channelRange: channelRangeFor(selector?.description ?? null),
+      valueMetas: valueMetasOf(sensorDescription),
     };
   }
 
@@ -64,12 +101,15 @@ export class ExperimentConfigService {
     return resolved;
   }
 
-  /** Para mostrar (GET /tasks/:id): nunca lanza; tipos sin plugin caen a valores por defecto. */
-  summarize(pref: { analyzerDevice: { type: string | null }; muxDevice: unknown | null }) {
+  /** Para mostrar (GET /tasks/:id): nunca lanza; tipos sin plugin o con rol incorrecto caen a valores por defecto. */
+  summarize(pref: { analyzerDevice: { type: string | null }; muxDevice: { type: string | null } | null }) {
+    const m = pref.muxDevice;
+    const selectorDescription = m && this.registry.role(m.type) === 'channel-selector' ? this.registry.describe(m.type!) : null;
+    const channelRange = channelRangeFor(selectorDescription);
     if (this.registry.role(pref.analyzerDevice.type) !== 'sensor') {
-      return { channelRange: { min: 1, max: pref.muxDevice ? CHANNEL_SLOTS : 1 }, sensorValues: [], simulated: false };
+      return { channelRange, sensorValues: [], simulated: false };
     }
     const d = this.registry.describe(pref.analyzerDevice.type!);
-    return { channelRange: channelRangeFor(d, !!pref.muxDevice), sensorValues: valueMetasOf(d), simulated: d.simulated };
+    return { channelRange, sensorValues: valueMetasOf(d), simulated: d.simulated };
   }
 }

@@ -1,5 +1,18 @@
 import { Injectable } from '@nestjs/common';
-import { DeviceDriverPlugin, DeviceServiceDescription, MeasureChannelParams, MeasuredPoint } from '../../core/device-plugin.interface';
+import raw from './service-description.json';
+import { parseServiceDescription } from '../../core/service-description';
+import type {
+  ConfigurationValues,
+  ConnectionTarget,
+  DeviceContext,
+  DeviceServiceDescription,
+  MeasuredPoint,
+  SensorPlugin,
+  SweepParams,
+} from '../../core/device-plugin.interface';
+
+/** Validada al cargar el módulo: una descripción inválida impide el arranque. */
+const DESCRIPTION = parseServiceDescription(raw, 'sim-impedance');
 
 /** Circuito de Randles simplificado: Rs + (Rp ‖ C). Valores típicos de un concreto en fraguado. */
 export interface RandlesParams { rs: number; rp: number; c: number }
@@ -20,46 +33,36 @@ export function sweepFrequencies(start: number, stop: number, points: number, sw
   });
 }
 
+/** Parámetros del modelo desde la configuración efectiva del dispositivo (`c` se configura en nF). */
+export function randlesParamsOf(cfg: ConfigurationValues): RandlesParams {
+  return { rs: Number(cfg.rs), rp: Number(cfg.rp), c: Number(cfg.c) * 1e-9 };
+}
+
 /**
  * Plugin SIMULADO: demuestra la intercambiabilidad de dispositivos (IEEE 1876) sin hardware.
- * Un solo sensor (|Z| en Ω), sin actuators ni MUX: mide un único canal lógico (canal 1).
+ * Un solo sensor (|Z| en Ω), sin actuators; el modelo y el ruido salen de la configuración del dispositivo.
  */
 @Injectable()
-export class SimulatedImpedancePlugin implements DeviceDriverPlugin {
+export class SimulatedImpedancePlugin implements SensorPlugin {
   static readonly DEVICE_TYPE = 'sim-impedance';
 
-  /** Ruido multiplicativo uniforme ±0.5 %; reemplazable en tests. */
-  noise: () => number = () => (Math.random() - 0.5) * 0.01;
+  /** Uniforme en [-0.5, 0.5); el ruido es z·(1 + 2·randomUnit()·noisePercent/100). Reemplazable en tests. */
+  randomUnit: () => number = () => Math.random() - 0.5;
 
   describe(): DeviceServiceDescription {
-    return {
-      deviceType: SimulatedImpedancePlugin.DEVICE_TYPE,
-      fullName: 'Impedancímetro simulado (Randles)',
-      manufacturer: 'Kronos (simulación)',
-      description: 'SIMULADO: genera |Z|(f) de un modelo Rs + (Rp ‖ C) con ruido; no requiere hardware ni MUX',
-      simulated: true,
-      connection: { requiresIp: false },
-      sensors: [{
-        sensorId: 'sim-impedance-z',
-        fullName: 'Módulo de impedancia simulado',
-        description: 'Módulo de la impedancia |Z| por frecuencia (simulado)',
-        protocol: 'simulated',
-        produces: 'application/json',
-        sensorValues: [{ name: 'z', unit: 'Ω', type: 'double', label: 'Módulo de impedancia |Z|', rangeMinimum: 0, rangeMaximum: 1e6 }],
-        accessMode: { accessModeType: 'pull' },
-      }],
-      actuators: [],
-    };
+    return DESCRIPTION;
   }
 
-  async testConnection(_ip: string, _deviceType: string, _port?: number): Promise<boolean> {
+  async testConnection(_target: ConnectionTarget): Promise<boolean> {
     return true;
   }
 
-  async measureChannel(params: MeasureChannelParams): Promise<MeasuredPoint[]> {
-    return sweepFrequencies(params.startFreq, params.stopFreq, params.points, params.sweepType).map((frequency) => ({
+  async getSensorData(device: DeviceContext, sweep: SweepParams): Promise<MeasuredPoint[]> {
+    const params = randlesParamsOf(device.configuration);
+    const noisePercent = Number(device.configuration.noisePercent ?? 0);
+    return sweepFrequencies(sweep.startFreq, sweep.stopFreq, sweep.points, sweep.sweepType).map((frequency) => ({
       frequency,
-      values: { z: randlesImpedance(frequency) * (1 + this.noise()) },
+      values: { z: randlesImpedance(frequency, params) * (1 + (2 * this.randomUnit() * noisePercent) / 100) },
     }));
   }
 }

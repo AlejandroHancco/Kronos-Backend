@@ -55,7 +55,7 @@ export class DeviceHealthService {
     status: string;
     projectId: string;
   }) {
-    const reachable = await this.devicesService.checkReachable(device.type ?? 'analyzer', device.ip);
+    const reachable = await this.devicesService.checkReachable(device.type ?? '', device.ip);
     const newStatus = reachable ? 'online' : 'offline';
 
     if (newStatus === device.status) return;

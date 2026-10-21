@@ -1,79 +1,49 @@
 import { Injectable, Logger } from '@nestjs/common';
 import * as net from 'net';
-import axios from 'axios';
-import {
-  DeviceDriverPlugin,
+import raw from './service-description.json';
+import { parseServiceDescription } from '../../core/service-description';
+import type {
+  ConfigurationValues,
+  ConnectionTarget,
+  DeviceContext,
   DeviceServiceDescription,
-  MeasureChannelParams,
   MeasuredPoint,
+  SensorPlugin,
+  SweepParams,
 } from '../../core/device-plugin.interface';
+import { HIOKI_SCPI_PORT, MEASURE_QUERY, parseGbResponse, sweepSetupCommands } from './scpi';
+
+/** Validada al cargar el módulo: una descripción inválida impide el arranque. */
+const DESCRIPTION = parseServiceDescription(raw, 'hioki-im3570');
 
 /**
- * Plugin del analyzer Hioki IM3570 (sensor, protocolo SCPI sobre TCP) + su MUX de
- * switching (actuator, protocolo HTTP). Es el primer "component module" del Kronos
- * Watcher, implementado según el estándar IEEE 1876 (LaaS).
+ * Plugin del analizador de impedancia Hioki IM3570: solo sensor (SCPI sobre TCP, puerto 3570).
+ * El MUX de canales es otro plugin (`kronos-mux-16`).
  */
 @Injectable()
-export class HiokiIm3570Plugin implements DeviceDriverPlugin {
+export class HiokiIm3570Plugin implements SensorPlugin {
   private readonly logger = new Logger(HiokiIm3570Plugin.name);
 
-  static readonly DEVICE_TYPE = 'analyzer';
-  static readonly MUX_DEVICE_TYPE = 'mux';
+  static readonly DEVICE_TYPE = 'hioki-im3570';
 
   describe(): DeviceServiceDescription {
-    return {
-      deviceType: HiokiIm3570Plugin.DEVICE_TYPE,
-      fullName: 'Hioki IM3570 LCR Meter',
-      manufacturer: 'Hioki',
-      description: 'Analizador de impedancia Hioki IM3570 (SCPI/TCP), con MUX de 16 canales',
-      simulated: false,
-      connection: { requiresIp: true, defaultPort: 3570 },
-      sensors: [{
-        sensorId: 'hioki-im3570-lcr',
-        fullName: 'Hioki IM3570 LCR Meter',
-        description: 'Conductancia (G) y susceptancia (B) por frecuencia',
-        protocol: 'tcp',
-        produces: 'text/csv',
-        // Sin rango fijo: depende del rango de medición del instrumento.
-        sensorValues: [
-          { name: 'g', unit: 'S', type: 'double', label: 'Conductancia' },
-          { name: 'b', unit: 'S', type: 'double', label: 'Susceptancia' },
-        ],
-        accessMode: { accessModeType: 'pull' },
-      }],
-      actuators: [{
-        actuatorId: 'mux-channel-selector',
-        fullName: 'Selector de canal del MUX',
-        description: 'Activa un canal del multiplexor antes de medir',
-        protocol: 'http',
-        inputType: 'integer',
-        actuatorValues: [{ name: 'channel', unit: '', type: 'integer', rangeMinimum: 1, rangeMaximum: 16, rangeStep: 1 }],
-        accessMode: { accessModeType: 'pull' },
-      }],
-      channelSelection: {
-        actuatorId: 'mux-channel-selector',
-        hostDeviceType: HiokiIm3570Plugin.MUX_DEVICE_TYPE,
-        hostLabel: 'MUX de canales',
-        required: true,
-        connection: { requiresIp: true },
-      },
-    };
+    return DESCRIPTION;
   }
 
-  async testConnection(ip: string, deviceType: string, port = 3570): Promise<boolean> {
-    if (deviceType === HiokiIm3570Plugin.MUX_DEVICE_TYPE) {
-      try {
-        await axios.get(`http://${ip}`, { timeout: 2000 });
-        return true;
-      } catch {
-        return false;
-      }
+  validateConfiguration(effective: ConfigurationValues): string | null {
+    const start = effective.defaultStartFreq;
+    const stop = effective.defaultStopFreq;
+    if (typeof start === 'number' && typeof stop === 'number' && start >= stop) {
+      return '"Frecuencia inicial por defecto" debe ser menor que "Frecuencia final por defecto"';
     }
+    return null;
+  }
 
+  async testConnection({ ip, port = HIOKI_SCPI_PORT }: ConnectionTarget): Promise<boolean> {
+    if (!ip) return false;
     return new Promise<boolean>((resolve) => {
       const socket = net.createConnection({ host: ip, port });
       socket.setTimeout(2000);
-
       socket.on('connect', () => {
         socket.destroy();
         resolve(true);
@@ -89,53 +59,22 @@ export class HiokiIm3570Plugin implements DeviceDriverPlugin {
     });
   }
 
-  /** "setActuatorData" del MUX (con reintentos). */
-  async selectChannel(muxIp: string, channel: number, retries = 3): Promise<void> {
-    for (let attempt = 0; attempt < retries; attempt++) {
-      try {
-        await axios.get(`http://${muxIp}/?orden=${channel}`, {
-          timeout: 5000,
-          validateStatus: () => true,
-        });
-        return;
-      } catch (error) {
-        if (attempt === retries - 1) {
-          throw new Error(`Could not activate MUX channel ${channel}: ${error.message}`);
-        }
-        await new Promise((resolve) => setTimeout(resolve, 500));
-      }
-    }
-  }
-
-  /**
-   * "getSensorData" del Hioki: lee byte a byte según protocolo SCPI.
-   */
-  measureChannel(params: MeasureChannelParams): Promise<MeasuredPoint[]> {
-    const { analyzerIp, startFreq, stopFreq, points, sweepType } = params;
-
+  /** "getSensorData": envía el setup del barrido, consulta :MEASure? y lee la respuesta hasta \n. */
+  getSensorData(device: DeviceContext, sweep: SweepParams): Promise<MeasuredPoint[]> {
     return new Promise((resolve, reject) => {
-      const socket = net.createConnection({ host: analyzerIp, port: 3570 }, () => {
+      const socket = net.createConnection({ host: device.ip ?? '', port: HIOKI_SCPI_PORT }, () => {
         socket.setTimeout(60000);
-
-        const setupCommands = [
-          ':MODE ANALyzer',
-          ':SWEep:TRIGger SEQuential',
-          `:LIST:STARt:STOP ${startFreq},${stopFreq},${points},${sweepType}`,
-          ':PARameter1 G',
-          ':PARameter3 B',
-          '*TRG',
-        ];
 
         (async () => {
           try {
-            // 1. Enviar comandos de setup sin esperar respuesta
-            for (const cmd of setupCommands) {
+            // 1. Comandos de setup sin esperar respuesta
+            for (const cmd of sweepSetupCommands(sweep)) {
               socket.write(cmd + '\r\n');
               await new Promise((r) => setTimeout(r, 100));
             }
 
-            // 2. Enviar :MEASure? y leer respuesta byte a byte
-            socket.write(':MEASure?\r\n');
+            // 2. :MEASure? y lectura byte a byte hasta \n (ignorando \r)
+            socket.write(MEASURE_QUERY + '\r\n');
 
             const csvRaw = await new Promise<string>((res, rej) => {
               let response = '';
@@ -144,18 +83,13 @@ export class HiokiIm3570Plugin implements DeviceDriverPlugin {
               const onData = (chunk: Buffer) => {
                 for (const byte of chunk) {
                   const char = String.fromCharCode(byte);
-
-                  // Leer hasta encontrar \n (ignorar \r)
                   if (char === '\n') {
                     clearTimeout(timeoutHandle);
                     socket.removeListener('data', onData);
                     res(response);
                     return;
                   }
-
-                  if (char !== '\r') {
-                    response += char;
-                  }
+                  if (char !== '\r') response += char;
                 }
               };
 
@@ -170,28 +104,14 @@ export class HiokiIm3570Plugin implements DeviceDriverPlugin {
 
             // 3. Loguear primeros y últimos 100 chars del CSV recibido
             const csvPreview =
-                csvRaw.length <= 100
-                    ? csvRaw
-                    : `${csvRaw.substring(0, 100)} ... ${csvRaw.substring(csvRaw.length - 100)}`;
+              csvRaw.length <= 100
+                ? csvRaw
+                : `${csvRaw.substring(0, 100)} ... ${csvRaw.substring(csvRaw.length - 100)}`;
             this.logger.debug(`CSV Response (${csvRaw.length} chars): ${csvPreview}`);
 
-            // 4. Parsear CSV como triplas [freq, g, b]
-            const csvData = csvRaw.split(',');
-            const data: MeasuredPoint[] = [];
-
-            for (let i = 0; i + 2 < csvData.length; i += 3) {
-              const freq = parseFloat(csvData[i]);
-              const g = parseFloat(csvData[i + 1]);
-              const b = parseFloat(csvData[i + 2]);
-
-              if (!isNaN(freq) && !isNaN(g) && !isNaN(b)) {
-                data.push({ frequency: freq, values: { g, b } });
-              }
-            }
-
+            // 4. Tripletas [freq, g, b]
             socket.destroy();
-            resolve(data);
-
+            resolve(parseGbResponse(csvRaw));
           } catch (err) {
             socket.destroy();
             reject(err);

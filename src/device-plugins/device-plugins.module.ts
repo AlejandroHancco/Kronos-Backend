@@ -1,6 +1,6 @@
 import { Global, Module } from '@nestjs/common';
 import { DevicePluginRegistry } from './core/device-plugin.registry';
-import { DeviceDriverPlugin } from './core/device-plugin.interface';
+import { DevicePlugin } from './core/device-plugin.interface';
 import { DEVICE_PLUGIN_INSTANCES } from './core/device-plugin.tokens';
 import { DEVICE_PLUGINS } from './plugins';
 import { DevicePluginsController } from './device-plugins.controller';
@@ -22,7 +22,7 @@ import { ExperimentConfigService } from './core/experiment-config.service';
     ...DEVICE_PLUGINS,
     {
       provide: DEVICE_PLUGIN_INSTANCES,
-      useFactory: (...plugins: DeviceDriverPlugin[]) => plugins,
+      useFactory: (...plugins: DevicePlugin[]) => plugins,
       inject: DEVICE_PLUGINS,
     },
     DevicePluginRegistry,

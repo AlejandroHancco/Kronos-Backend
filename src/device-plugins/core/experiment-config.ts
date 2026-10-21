@@ -1,38 +1,54 @@
-import type { DeviceRole } from './device-plugin.registry';
-import type { DeviceServiceDescription } from './device-plugin.interface';
+import type { DeviceRole, DeviceServiceDescription } from './device-plugin.interface';
 
 export const CHANNEL_SLOTS = 16;
 export interface MeasurementValueMeta { name: string; unit: string; label?: string }
 export interface ChannelRange { min: number; max: number }
 export interface ConfigDevice { id: string; name: string; type: string | null; projectId: string }
 
+/**
+ * Reglas de una configuración de experimento: un equipo de medición (sensor) y, opcionalmente,
+ * cualquier dispositivo selector de canal registrado. Devuelve el primer error o `null`.
+ */
 export function experimentConfigError(a: {
-  taskProjectId: string; sensor: ConfigDevice; mux: ConfigDevice | null;
-  sensorRole: DeviceRole | undefined; description: DeviceServiceDescription | undefined;
+  taskProjectId: string;
+  sensor: ConfigDevice;
+  selector: ConfigDevice | null;
+  sensorRole?: DeviceRole;
+  selectorRole?: DeviceRole;
+  sensorDescription?: DeviceServiceDescription;
 }): string | null {
-  const { sensor, mux, description: d } = a;
+  const { sensor, selector, sensorDescription: d } = a;
   if (sensor.projectId !== a.taskProjectId) return 'El equipo de medición no pertenece al proyecto de la tarea';
-  if (a.sensorRole !== 'sensor' || !d) return `El dispositivo "${sensor.name}" no es un equipo de medición registrado (tipo "${sensor.type}")`;
+  if (a.sensorRole !== 'sensor' || !d) {
+    return `El dispositivo "${sensor.name}" no es un equipo de medición registrado (tipo "${sensor.type}")`;
+  }
   if (valueMetasOf(d).length === 0) return `"${d.fullName}" no declara valores de sensor`;
-  const cs = d.channelSelection;
-  if (mux) {
-    if (!cs) return `"${d.fullName}" no declara un selector de canal: no admite MUX`;
-    if (mux.type !== cs.hostDeviceType) return `El MUX debe ser un dispositivo de tipo "${cs.hostDeviceType}"`;
-    if (mux.projectId !== a.taskProjectId) return 'El MUX no pertenece al proyecto de la tarea';
-  } else if (cs?.required) {
-    return `"${d.fullName}" requiere un ${cs.hostLabel}`;
+  if (selector) {
+    if (a.selectorRole !== 'channel-selector') {
+      return `El dispositivo "${selector.name}" no es un selector de canal registrado (tipo "${selector.type}")`;
+    }
+    if (selector.projectId !== a.taskProjectId) return 'El MUX no pertenece al proyecto de la tarea';
   }
   return null;
 }
 
-export function channelRangeFor(d: DeviceServiceDescription, hasMux: boolean): ChannelRange {
-  if (!hasMux || !d.channelSelection) return { min: 1, max: 1 };
-  const act = d.actuators.find((x) => x.actuatorId === d.channelSelection!.actuatorId);
-  const ch = act?.actuatorValues.find((v) => v.name === 'channel');
+/** Rango declarado por el `channelSelector` del dispositivo, acotado a [1, CHANNEL_SLOTS]; `null` si no declara uno. */
+export function channelRangeOf(d: DeviceServiceDescription): ChannelRange | null {
+  const cs = d.channelSelector;
+  if (!cs) return null;
+  const value = d.actuators
+    .find((x) => x.actuatorId === cs.actuatorId)
+    ?.actuatorValues.find((v) => v.name === cs.valueName);
+  if (!value) return null;
   return {
-    min: Math.max(1, ch?.rangeMinimum ?? 1),
-    max: Math.min(CHANNEL_SLOTS, ch?.rangeMaximum ?? CHANNEL_SLOTS),
+    min: Math.max(1, value.rangeMinimum ?? 1),
+    max: Math.min(CHANNEL_SLOTS, value.rangeMaximum ?? CHANNEL_SLOTS),
   };
+}
+
+/** Rango de canales de una configuración: el del selector, o solo el canal 1 sin selector. */
+export function channelRangeFor(selector: DeviceServiceDescription | null): ChannelRange {
+  return (selector && channelRangeOf(selector)) || { min: 1, max: 1 };
 }
 
 export function invalidChannels(channels: number[], r: ChannelRange): number[] {
@@ -46,18 +62,4 @@ export function channelRangeMessage(r: ChannelRange, bad: number[]): string {
 
 export function valueMetasOf(d: DeviceServiceDescription): MeasurementValueMeta[] {
   return d.sensors.flatMap((s) => s.sensorValues.map((v) => ({ name: v.name, unit: v.unit, ...(v.label ? { label: v.label } : {}) })));
-}
-
-/**
- * Antes de medir: si la configuración tiene MUX, el equipo debe declarar `channelSelection`
- * y su plugin implementar `selectChannel`. Sin MUX nunca se selecciona canal.
- */
-export function channelSelectionError(
-  hasMux: boolean,
-  d: DeviceServiceDescription,
-  plugin: { selectChannel?: unknown },
-): string | null {
-  if (!hasMux) return null;
-  if (d.channelSelection && typeof plugin.selectChannel === 'function') return null;
-  return 'La configuración de la tarea tiene un MUX pero el equipo no admite selección de canal; revisa la configuración';
 }

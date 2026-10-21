@@ -1,0 +1,94 @@
+{
+  "deviceType": "hioki-im3570",
+  "fullName": "Hioki IM3570 LCR Meter",
+  "shortName": "Hioki IM3570",
+  "manufacturer": "Hioki",
+  "description": "Analizador de impedancia Hioki IM3570 (SCPI sobre TCP): conductancia y susceptancia por frecuencia",
+  "simulated": false,
+  "connection": { "requiresIp": true, "defaultPort": 3570 },
+  "sensors": [
+    {
+      "sensorId": "hioki-im3570-lcr",
+      "fullName": "Hioki IM3570 LCR Meter",
+      "description": "Conductancia (G) y susceptancia (B) por frecuencia",
+      "protocol": "tcp",
+      "produces": "text/csv",
+      "sensorValues": [
+        { "name": "g", "unit": "S", "type": "double", "label": "Conductancia" },
+        { "name": "b", "unit": "S", "type": "double", "label": "Susceptancia" }
+      ],
+      "accessMode": { "accessModeType": "pull" }
+    }
+  ],
+  "actuators": [],
+  "configuration": [
+    {
+      "name": "mode",
+      "label": "Modo de medición",
+      "description": "Kronos envía :MODE ANALyzer antes de cada barrido",
+      "type": "string",
+      "unit": "",
+      "default": "ANALyzer",
+      "access": "read-only",
+      "storage": "fixed"
+    },
+    {
+      "name": "parameters",
+      "label": "Parámetros medidos",
+      "description": ":PARameter1 G y :PARameter3 B; fijos porque Kronos declara g y b (S)",
+      "type": "string",
+      "unit": "",
+      "default": "G, B",
+      "access": "read-only",
+      "storage": "fixed"
+    },
+    {
+      "name": "defaultStartFreq",
+      "label": "Frecuencia inicial por defecto",
+      "description": "Valor sugerido al crear tareas; no afecta barridos en curso",
+      "type": "double",
+      "unit": "Hz",
+      "rangeMinimum": 4,
+      "rangeMaximum": 5000000,
+      "default": 50000,
+      "access": "read-write",
+      "storage": "persisted"
+    },
+    {
+      "name": "defaultStopFreq",
+      "label": "Frecuencia final por defecto",
+      "description": "Valor sugerido al crear tareas; no afecta barridos en curso",
+      "type": "double",
+      "unit": "Hz",
+      "rangeMinimum": 4,
+      "rangeMaximum": 5000000,
+      "default": 500000,
+      "access": "read-write",
+      "storage": "persisted"
+    },
+    {
+      "name": "defaultPoints",
+      "label": "Puntos por defecto",
+      "description": "Valor sugerido al crear tareas; no afecta barridos en curso",
+      "type": "integer",
+      "unit": "",
+      "rangeMinimum": 1,
+      "rangeMaximum": 801,
+      "rangeStep": 1,
+      "default": 801,
+      "access": "read-write",
+      "storage": "persisted"
+    },
+    {
+      "name": "defaultSweepType",
+      "label": "Tipo de barrido por defecto",
+      "description": "Valor sugerido al crear tareas; no afecta barridos en curso",
+      "type": "string",
+      "unit": "",
+      "allowedValues": ["LIN", "LOG"],
+      "default": "LOG",
+      "access": "read-write",
+      "storage": "persisted"
+    }
+  ]
+}

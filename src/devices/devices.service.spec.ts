@@ -2,15 +2,16 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { DevicesService } from './devices.service';
 import { DevicePluginRegistry } from '../device-plugins/core/device-plugin.registry';
 import { HiokiIm3570Plugin } from '../device-plugins/plugins/hioki-im3570/hioki-im3570.plugin';
+import { KronosMux16Plugin } from '../device-plugins/plugins/kronos-mux-16/kronos-mux-16.plugin';
 import { SimulatedImpedancePlugin } from '../device-plugins/plugins/sim-impedance/sim-impedance.plugin';
 
 function setup() {
-  const registry = new DevicePluginRegistry([new HiokiIm3570Plugin(), new SimulatedImpedancePlugin()]);
+  const registry = new DevicePluginRegistry([new HiokiIm3570Plugin(), new KronosMux16Plugin(), new SimulatedImpedancePlugin()]);
   const prisma = {
     device: {
       create: jest.fn(async ({ data }) => data),
       findFirst: jest.fn(),
-      findUnique: jest.fn(async () => ({ id: 'd1', projectId: 'p1', name: 'Eq', type: 'analyzer', ip: '10.0.0.5' })),
+      findUnique: jest.fn(async () => ({ id: 'd1', projectId: 'p1', name: 'Eq', type: 'hioki-im3570', ip: '10.0.0.5' })),
       update: jest.fn(async ({ data }) => data),
     },
     taskPreference: { count: jest.fn(async () => 0) },
@@ -39,7 +40,21 @@ describe('DevicesService (tipos por plugin)', () => {
   });
 
   it('testConnection del analyzer exige IP', async () => {
-    await expect(setup().service.testConnection({ type: 'analyzer' })).rejects.toBeInstanceOf(BadRequestException);
+    await expect(setup().service.testConnection({ type: 'hioki-im3570' })).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('checkReachable delega en testConnection del plugin con { ip, port } (puerto por defecto del catálogo)', async () => {
+    const registry = new DevicePluginRegistry([new HiokiIm3570Plugin(), new KronosMux16Plugin(), new SimulatedImpedancePlugin()]);
+    const service = new DevicesService({} as any, {} as any, registry);
+    const hioki = jest.spyOn(registry.get('hioki-im3570'), 'testConnection').mockResolvedValue(true);
+    const mux = jest.spyOn(registry.get('kronos-mux-16'), 'testConnection').mockResolvedValue(true);
+    await expect(service.checkReachable('hioki-im3570', '10.0.0.5')).resolves.toBe(true);
+    expect(hioki).toHaveBeenCalledWith({ ip: '10.0.0.5', port: 3570 });
+    await expect(service.checkReachable('kronos-mux-16', '10.0.0.6', 8080)).resolves.toBe(true);
+    expect(mux).toHaveBeenCalledWith({ ip: '10.0.0.6', port: 8080 });
+    await expect(service.checkReachable('kronos-mux-16', null)).resolves.toBe(false);
+    await expect(service.checkReachable('analyzer', '10.0.0.5')).resolves.toBe(false);
+    await expect(service.checkReachable('', '10.0.0.5')).resolves.toBe(false);
   });
 
   it('addresslessTypes lista solo tipos sin IP', () => {
@@ -78,7 +93,7 @@ describe('DevicesService (tipos por plugin)', () => {
 
     it('mismo tipo o sin tipo: no consulta uso y conserva la IP enviada', async () => {
       const { service, prisma } = setup();
-      const out = await service.updateInProject('p1', 'd1', { type: 'analyzer', name: 'Nuevo', ip: '10.0.0.7' }, 'u1');
+      const out = await service.updateInProject('p1', 'd1', { type: 'hioki-im3570', name: 'Nuevo', ip: '10.0.0.7' }, 'u1');
       expect(out).toMatchObject({ name: 'Nuevo', ip: '10.0.0.7' });
       await service.updateInProject('p1', 'd1', { name: 'Otro' }, 'u1');
       expect(prisma.taskPreference.count).not.toHaveBeenCalled();
