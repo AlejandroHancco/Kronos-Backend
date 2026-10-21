@@ -42,6 +42,9 @@ export const blockKeyOf = (a: AcquisitionSnapshot): string =>
 export const csvHeader = (cols: CsvValueColumn[], xColumn: string | null): string[] =>
   [...HEADER_BEFORE, ...(xColumn ? [xColumn] : []), ...HEADER_CHANNEL, ...cols.map((c) => c.column), ...HEADER_AFTER];
 
+/** Encabezado de un CSV sin mediciones: el de una medición sin adquisición (barrido en frecuencia). */
+export const defaultCsvHeader = (cols: CsvValueColumn[]): string[] => csvHeader(cols, xColumnOf(parseAcquisitionSnapshot(undefined)));
+
 const metaKey = (name: string, unit: string) => `${name}\u0000${unit}`;
 
 export interface CsvChannel {
@@ -142,5 +145,6 @@ export function buildCsv(metaLines: string[], measurements: CsvMeasurement[]): s
     }
     lines.push(...rowsToCsvLines(m, cols));
   }
+  if (measurements.length === 0) lines.push(defaultCsvHeader(cols).join(','));
   return lines.join('\r\n');
 }

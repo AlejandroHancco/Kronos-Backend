@@ -9,7 +9,7 @@ import { MeasurementJobData } from './scheduling.service';
 
 /**
  * Procesador de la cola 'measurements'.
- * Concurrencia 1 (default de Bull): el MUX/analyzer solo soporta
+ * Concurrencia 1 (default de Bull): el equipo de medición y el selector de canal solo soportan
  * una medición a la vez — nunca subir la concurrencia de este processor.
  *
  * Reintentos: configurados al publicar el job (attempts: 3, backoff exponencial).
@@ -40,7 +40,7 @@ export class MeasurementProcessor {
       attempt: job.attemptsMade + 1,
     });
 
-    // Ejecuta la medición vía TCP (SCPI Hioki + MUX HTTP), guarda en DB
+    // Ejecuta la medición con los plugins del experimento (equipo de medición + selector opcional), guarda en DB
     // y emite measurement:complete a la sala de la tarea (dentro de measureTask).
     const result = await this.measurementsService.measureTask(taskId, userId, {
       ranges,

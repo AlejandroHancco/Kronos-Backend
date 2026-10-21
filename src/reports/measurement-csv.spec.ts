@@ -211,3 +211,11 @@ describe('blockKeyOf', () => {
     expect(blockKeyOf({ kind: 'sweep', variable: { name: 'voltage', unit: 'V', label: 'Voltaje' } })).toBe('sweep:voltage:V');
   });
 });
+
+describe('CSV sin mediciones', () => {
+  it('buildCsv emite igualmente el encabezado por defecto (barrido en frecuencia)', () => {
+    const csv = buildCsv(['Kronos | Tarea: Viga A'], []);
+    const lines = csv.replace('﻿', '').split('\r\n');
+    expect(lines).toEqual(['# Kronos | Tarea: Viga A', csvHeader([], 'frequency_hz').join(',')]);
+  });
+});

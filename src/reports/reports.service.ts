@@ -6,7 +6,7 @@ import { TeamScopeService } from '../common/team-scope.service';
 import { parseAcquisitionSnapshot, parseSensorValues, storedPointsOf } from '../measurements/measurement-data';
 import { loadSingleReadings, singleReadingFields } from '../measurements/single-readings';
 import {
-  buildCsv, csvPreamble, rowsToCsvLines, valueColumnsFor, csvHeader, xColumnOf, blockKeyOf, CsvChannel, CsvMeasurement,
+  buildCsv, csvPreamble, rowsToCsvLines, valueColumnsFor, csvHeader, defaultCsvHeader, xColumnOf, blockKeyOf, CsvChannel, CsvMeasurement,
 } from './measurement-csv';
 import {
   fetchKeysetPage, PageCursor, PageIdRow, pageIdsQuery, streamMeasurementsCsv, valueColumnsQuery, writeChunk,
@@ -331,6 +331,8 @@ export class ReportsService {
 
     try {
       await streamMeasurementsCsv(fetchPage, (chunk) => writeChunk(res, chunk), isAborted, toLines, CSV_BATCH_SIZE);
+      // Sin mediciones en el rango: igual se emite un encabezado (como buildCsv)
+      if (prevBlockKey === null && !isAborted()) await writeChunk(res, '\r\n' + defaultCsvHeader(cols).join(','));
       if (!isAborted()) res.end();
     } catch (err) {
       this.logger.error(`Error transmitiendo CSV de tarea ${taskId}`, err instanceof Error ? err.stack : err);

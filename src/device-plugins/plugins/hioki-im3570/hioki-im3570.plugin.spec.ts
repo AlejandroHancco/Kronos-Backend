@@ -119,6 +119,11 @@ describe('HiokiIm3570Plugin', () => {
     expect(openSpy).toHaveBeenCalledWith('10.0.0.5', 3570, { terminator: '\r\n', writeDelayMs: 100, connectTimeoutMs: 5000 });
   });
 
+  it('openTransport: error de conexión en español (como el E4402B)', async () => {
+    jest.spyOn(RawTcpScpi, 'open').mockRejectedValue(new Error('connect ECONNREFUSED 10.0.0.5:3570'));
+    await expect(plugin.openTransport('10.0.0.5')).rejects.toThrow('Sin respuesta del Hioki IM3570 en 10.0.0.5:3570');
+  });
+
   it('getSensorData cierra el transporte aunque query rechace', async () => {
     const { transport, isClosed } = fakeTransport({ queryError: new Error('Tiempo de espera agotado esperando respuesta') });
     jest.spyOn(plugin, 'openTransport').mockResolvedValue(transport);

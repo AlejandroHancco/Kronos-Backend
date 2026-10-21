@@ -61,9 +61,13 @@ export class HiokiIm3570Plugin implements SensorPlugin {
     });
   }
 
-  /** Abre el transporte (reemplazable en tests). */
-  openTransport(host: string): Promise<ScpiTransport> {
-    return RawTcpScpi.open(host, HIOKI_SCPI_PORT, { terminator: '\r\n', writeDelayMs: 100, connectTimeoutMs: 5000 });
+  /** Abre el transporte (reemplazable en tests); un fallo de conexión se informa en español. */
+  async openTransport(host: string): Promise<ScpiTransport> {
+    try {
+      return await RawTcpScpi.open(host, HIOKI_SCPI_PORT, { terminator: '\r\n', writeDelayMs: 100, connectTimeoutMs: 5000 });
+    } catch {
+      throw new Error(`Sin respuesta del Hioki IM3570 en ${host}:${HIOKI_SCPI_PORT}`);
+    }
   }
 
   /** "getSensorData": setup del barrido, :MEASure? y lectura hasta \n (mismos comandos y tiempos que antes). */

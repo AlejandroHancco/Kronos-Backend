@@ -79,3 +79,28 @@ describe('ReportsService.getTaskReport — channels, data y sensorValues por med
     expect(prisma.measurement.findMany.mock.calls.every(([a]: any) => !(a.select.data && !a.select.measurementChannels))).toBe(true);
   });
 });
+
+describe('ReportsService.streamTaskCsv — sin mediciones', () => {
+  it('transmite el preámbulo y el encabezado por defecto (barrido en frecuencia)', async () => {
+    const prisma = {
+      task: { findUnique: jest.fn(async () => ({ name: 'Tarea', project: { name: 'Proyecto' } })) },
+      measurement: { findMany: jest.fn(async () => []) },
+      $queryRaw: jest.fn(async () => []),
+    };
+    const service = new ReportsService(prisma as any, { assertTaskInTeam: jest.fn() } as any);
+    const chunks: string[] = [];
+    const res = {
+      destroyed: false, writableEnded: false,
+      setHeader: jest.fn(), on: jest.fn(), once: jest.fn(), destroy: jest.fn(),
+      write: jest.fn((c: string) => { chunks.push(c); return true; }),
+      end: jest.fn(),
+    };
+    await service.streamTaskCsv('u1', 1, { from: null, to: null }, res as any);
+    const lines = chunks.join('').replace('﻿', '').split('\r\n');
+    expect(lines[lines.length - 1]).toBe(
+      'measurement_id,taken_at,taken_by,preset,watcher_status,frequency_hz,channel,channel_alias,concrete_mix,has_emulsifier,sample_age,temperature,humidity,notes',
+    );
+    expect(res.end).toHaveBeenCalled();
+    expect(res.destroy).not.toHaveBeenCalled();
+  });
+});
