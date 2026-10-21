@@ -99,10 +99,41 @@ export interface ChannelSelectionBinding {
   connection: DeviceConnection;
 }
 
+/** Extensión Kronos: qué valor de qué actuator selecciona el canal (entero, con rango ≥ 1). */
+export interface ChannelSelectorMetadata {
+  actuatorId: string;
+  valueName: string;
+}
+
+export type ConfigurationValue = number | string | boolean;
+export type ConfigurationValues = Record<string, ConfigurationValue>;
+
+/**
+ * Extensión Kronos, modelada sobre la Tabla 15: un parámetro configurable del dispositivo
+ * (getConfiguration/setConfiguration), no parte del estándar.
+ */
+export interface ConfigurationParameterMetadata {
+  name: string;
+  label: string;
+  description?: string;
+  type: ValueType;
+  unit: string;
+  rangeMinimum?: number;
+  rangeMaximum?: number;
+  rangeStep?: number;
+  allowedValues?: Array<string | number>;
+  /** Obligatorio para storage 'fixed' y 'persisted'. */
+  default?: ConfigurationValue;
+  access: 'read-only' | 'read-write';
+  storage: 'fixed' | 'persisted' | 'live';
+}
+
 /** Service description (4.2). */
 export interface DeviceServiceDescription {
   deviceType: string;
   fullName: string;
+  /** Extensión Kronos: nombre corto para catálogos y UI. */
+  shortName?: string;
   manufacturer: string;
   description: string;
   simulated: boolean;
@@ -110,6 +141,18 @@ export interface DeviceServiceDescription {
   sensors: SensorMetadata[];
   actuators: ActuatorMetadata[];
   channelSelection?: ChannelSelectionBinding;
+  /** Extensión Kronos: qué actuator/valor selecciona el canal. */
+  channelSelector?: ChannelSelectorMetadata;
+  /** Extensión Kronos: parámetros configurables del dispositivo. */
+  configuration?: ConfigurationParameterMetadata[];
+}
+
+/** Instancia concreta de dispositivo (fila `devices`) que recibe un plugin. */
+export interface DeviceContext {
+  id: string;
+  name: string;
+  ip: string | null;
+  configuration: ConfigurationValues;
 }
 
 /** Un punto medido: una frecuencia con sus valores de sensor por nombre (ej. {g, b}). */
