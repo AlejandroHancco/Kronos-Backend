@@ -11,6 +11,8 @@ import type {
   SensorPlugin,
 } from '../../core/device-plugin.interface';
 import type { AcquisitionRequest } from '../../core/acquisition';
+import type { ScpiTransport } from '../../core/transports/scpi-transport';
+import { RawTcpScpi } from '../../core/transports/raw-tcp-scpi';
 import { HIOKI_SCPI_PORT, MEASURE_QUERY, parseGbResponse, sweepSetupCommands } from './scpi';
 
 /** Validada al cargar el módulo: una descripción inválida impide el arranque. */
@@ -59,76 +61,24 @@ export class HiokiIm3570Plugin implements SensorPlugin {
     });
   }
 
-  /** "getSensorData": envía el setup del barrido, consulta :MEASure? y lee la respuesta hasta \n. */
-  getSensorData(device: DeviceContext, request: AcquisitionRequest): Promise<MeasuredPoint[]> {
-    if (request.kind !== 'sweep') return Promise.reject(new Error('El Hioki IM3570 solo hace barridos'));
-    const sweep = request;
-    // Sin IP, net.createConnection usaría localhost: fallar antes con un mensaje claro.
-    if (!device.ip) return Promise.reject(new Error(`El equipo "${device.name}" no tiene IP configurada`));
-    const host = device.ip;
-    return new Promise((resolve, reject) => {
-      const socket = net.createConnection({ host, port: HIOKI_SCPI_PORT }, () => {
-        socket.setTimeout(60000);
+  /** Abre el transporte (reemplazable en tests). */
+  openTransport(host: string): Promise<ScpiTransport> {
+    return RawTcpScpi.open(host, HIOKI_SCPI_PORT, { terminator: '\r\n', writeDelayMs: 100, connectTimeoutMs: 5000 });
+  }
 
-        (async () => {
-          try {
-            // 1. Comandos de setup sin esperar respuesta
-            for (const cmd of sweepSetupCommands(sweep)) {
-              socket.write(cmd + '\r\n');
-              await new Promise((r) => setTimeout(r, 100));
-            }
-
-            // 2. :MEASure? y lectura byte a byte hasta \n (ignorando \r)
-            socket.write(MEASURE_QUERY + '\r\n');
-
-            const csvRaw = await new Promise<string>((res, rej) => {
-              let response = '';
-              let timeoutHandle: NodeJS.Timeout;
-
-              const onData = (chunk: Buffer) => {
-                for (const byte of chunk) {
-                  const char = String.fromCharCode(byte);
-                  if (char === '\n') {
-                    clearTimeout(timeoutHandle);
-                    socket.removeListener('data', onData);
-                    res(response);
-                    return;
-                  }
-                  if (char !== '\r') response += char;
-                }
-              };
-
-              socket.on('data', onData);
-
-              // Timeout de 55 segundos para esperar datos
-              timeoutHandle = setTimeout(() => {
-                socket.removeListener('data', onData);
-                rej(new Error('Timeout waiting for measurement data'));
-              }, 55000);
-            });
-
-            // 3. Loguear primeros y últimos 100 chars del CSV recibido
-            const csvPreview =
-              csvRaw.length <= 100
-                ? csvRaw
-                : `${csvRaw.substring(0, 100)} ... ${csvRaw.substring(csvRaw.length - 100)}`;
-            this.logger.debug(`CSV Response (${csvRaw.length} chars): ${csvPreview}`);
-
-            // 4. Tripletas [freq, g, b]
-            socket.destroy();
-            resolve(parseGbResponse(csvRaw));
-          } catch (err) {
-            socket.destroy();
-            reject(err);
-          }
-        })();
-      });
-
-      socket.on('error', reject);
-      socket.on('timeout', () => {
-        socket.destroy();
-        reject(new Error('Analyzer connection timeout'));
-      });
-    });
+  /** "getSensorData": setup del barrido, :MEASure? y lectura hasta \n (mismos comandos y tiempos que antes). */
+  async getSensorData(device: DeviceContext, request: AcquisitionRequest): Promise<MeasuredPoint[]> {
+    if (request.kind !== 'sweep') throw new Error('El Hioki IM3570 solo hace barridos');
+    if (!device.ip) throw new Error(`El equipo "${device.name}" no tiene IP configurada`);
+    const t = await this.openTransport(device.ip);
+    try {
+      for (const cmd of sweepSetupCommands(request)) await t.write(cmd);
+      const csvRaw = await t.query(MEASURE_QUERY, 55_000);
+      const preview = csvRaw.length <= 100 ? csvRaw : `${csvRaw.substring(0, 100)} ... ${csvRaw.substring(csvRaw.length - 100)}`;
+      this.logger.debug(`CSV Response (${csvRaw.length} chars): ${preview}`);
+      return parseGbResponse(csvRaw);
+    } finally {
+      t.close();
+    }
   }
 }

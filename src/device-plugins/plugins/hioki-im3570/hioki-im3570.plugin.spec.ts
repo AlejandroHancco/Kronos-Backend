@@ -1,9 +1,34 @@
 import { HiokiIm3570Plugin } from './hioki-im3570.plugin';
 import { effectiveConfiguration } from '../../core/configuration';
+import type { ScpiTransport } from '../../core/transports/scpi-transport';
+
+/** Transporte falso que registra write/query y permite forzar un rechazo en query. */
+function fakeTransport(opts: { queryResult?: string; queryError?: Error } = {}) {
+  const calls: Array<{ op: 'write' | 'query'; command: string; timeoutMs?: number }> = [];
+  let closed = false;
+  const transport: ScpiTransport = {
+    write: async (command: string) => {
+      calls.push({ op: 'write', command });
+    },
+    query: async (command: string, timeoutMs?: number) => {
+      calls.push({ op: 'query', command, timeoutMs });
+      if (opts.queryError) throw opts.queryError;
+      return opts.queryResult ?? '';
+    },
+    close: () => {
+      closed = true;
+    },
+  };
+  return { transport, calls, isClosed: () => closed };
+}
 
 describe('HiokiIm3570Plugin', () => {
   const plugin = new HiokiIm3570Plugin();
   const d = plugin.describe();
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
 
   it('se describe como sensor hioki-im3570 sin actuators, con g y b en S', () => {
     expect(HiokiIm3570Plugin.DEVICE_TYPE).toBe('hioki-im3570');
@@ -57,5 +82,44 @@ describe('HiokiIm3570Plugin', () => {
     await expect(
       plugin.getSensorData({ id: 'h', name: 'Hioki lab', ip: '10.0.0.5', configuration: {} }, { kind: 'single' }),
     ).rejects.toThrow('El Hioki IM3570 solo hace barridos');
+  });
+
+  it('getSensorData envía el setup, consulta :MEASure? y parsea la respuesta', async () => {
+    const { transport, calls, isClosed } = fakeTransport({ queryResult: '9000,1.5,2.5,10000,1.6,2.6' });
+    jest.spyOn(plugin, 'openTransport').mockResolvedValue(transport);
+
+    const points = await plugin.getSensorData(
+      { id: 'h', name: 'Hioki lab', ip: '10.0.0.5', configuration: {} },
+      { kind: 'sweep', start: 9000, stop: 10000, points: 2, scale: 'LOG' },
+    );
+
+    expect(plugin.openTransport).toHaveBeenCalledWith('10.0.0.5');
+    expect(calls.slice(0, 6)).toEqual([
+      { op: 'write', command: ':MODE ANALyzer' },
+      { op: 'write', command: ':SWEep:TRIGger SEQuential' },
+      { op: 'write', command: ':LIST:STARt:STOP 9000,10000,2,LOG' },
+      { op: 'write', command: ':PARameter1 G' },
+      { op: 'write', command: ':PARameter3 B' },
+      { op: 'write', command: '*TRG' },
+    ]);
+    expect(calls[6]).toEqual({ op: 'query', command: ':MEASure?', timeoutMs: 55000 });
+    expect(points).toEqual([
+      { x: 9000, values: { g: 1.5, b: 2.5 } },
+      { x: 10000, values: { g: 1.6, b: 2.6 } },
+    ]);
+    expect(isClosed()).toBe(true);
+  });
+
+  it('getSensorData cierra el transporte aunque query rechace', async () => {
+    const { transport, isClosed } = fakeTransport({ queryError: new Error('Tiempo de espera agotado esperando respuesta') });
+    jest.spyOn(plugin, 'openTransport').mockResolvedValue(transport);
+
+    await expect(
+      plugin.getSensorData(
+        { id: 'h', name: 'Hioki lab', ip: '10.0.0.5', configuration: {} },
+        { kind: 'sweep', start: 1, stop: 2, points: 2, scale: 'LOG' },
+      ),
+    ).rejects.toThrow('Tiempo de espera agotado esperando respuesta');
+    expect(isClosed()).toBe(true);
   });
 });
