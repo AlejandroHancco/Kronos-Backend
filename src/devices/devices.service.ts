@@ -1,5 +1,5 @@
 import { Injectable, BadRequestException, HttpException, HttpStatus, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Device, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { TeamScopeService } from '../common/team-scope.service';
 import { CreateDeviceDto } from './dto/create-device.dto';
@@ -7,6 +7,7 @@ import { UpdateDeviceDto } from './dto/update-device.dto';
 import { UpdateDeviceStatusDto } from './dto/update-device-status.dto';
 import { TestConnectionDto } from './dto/test-connection.dto';
 import { DevicePluginRegistry, DeviceTypeCatalogEntry } from '../device-plugins/core/device-plugin.registry';
+import { DeviceConfigurationService } from '../device-plugins/core/device-configuration.service';
 
 @Injectable()
 export class DevicesService {
@@ -14,6 +15,7 @@ export class DevicesService {
       private prisma: PrismaService,
       private teamScope: TeamScopeService,
       private devicePlugins: DevicePluginRegistry,
+      private deviceConfiguration: DeviceConfigurationService,
   ) {}
 
   // ── Global: todos los dispositivos de proyectos del equipo del usuario ──────
@@ -103,6 +105,8 @@ export class DevicesService {
               'No se puede cambiar el tipo: el dispositivo está en uso en configuraciones de tareas. Quítalo de esas configuraciones primero.',
           );
         }
+        // La configuración guardada pertenece al modelo anterior.
+        data.configuration = Prisma.DbNull;
       }
       // Misma regla que al crear: los tipos sin dirección no guardan IP.
       if (!entry.connection.requiresIp) data.ip = null;
@@ -181,14 +185,28 @@ export class DevicesService {
     return this.devicePlugins.get(type).testConnection({ ip, port: port ?? entry.connection.defaultPort });
   }
 
+  /** Dispositivo de un proyecto del equipo del usuario, o 404. */
+  private async findForUser(deviceId: string, userId: string): Promise<Device> {
+    const teamWhere = await this.teamScope.projectWhereForUser(userId);
+    const device = await this.prisma.device.findFirst({ where: { id: deviceId, project: teamWhere } });
+    if (!device) throw new NotFoundException('Device not found');
+    return device;
+  }
+
+  /** getConfiguration: parámetros declarados por el plugin con su valor actual. */
+  async configurationForUser(deviceId: string, userId: string) {
+    return this.deviceConfiguration.view(await this.findForUser(deviceId, userId));
+  }
+
+  /** setConfiguration: valida, aplica en vivo y/o guarda; rechazado mientras el dispositivo mide. */
+  async configureForUser(deviceId: string, values: Record<string, unknown>, userId: string) {
+    return this.deviceConfiguration.apply(await this.findForUser(deviceId, userId), values);
+  }
+
   /** Service description (IEEE 1876 §4.2) + metadata de instancia para un dispositivo del equipo del usuario. */
   async describeForUser(deviceId: string, userId: string) {
-    const teamWhere = await this.teamScope.projectWhereForUser(userId);
-    const device = await this.prisma.device.findFirst({
-      where: { id: deviceId, project: teamWhere },
-      select: { id: true, name: true, type: true, ip: true, status: true, projectId: true },
-    });
-    if (!device) throw new NotFoundException('Device not found');
+    const { id, name, type, ip, status, projectId } = await this.findForUser(deviceId, userId);
+    const device = { id, name, type, ip, status, projectId };
     const role = this.devicePlugins.role(device.type);
     if (!role) throw new NotFoundException(`No hay un device plugin registrado para el tipo "${device.type}"`);
     let service = this.devicePlugins.describe(device.type!);

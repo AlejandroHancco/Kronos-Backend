@@ -4,6 +4,7 @@ import {
   Post,
   Patch,
   Delete,
+  Put,
   Body,
   Param,
   ParseUUIDPipe,
@@ -14,6 +15,7 @@ import { CreateDeviceDto } from './dto/create-device.dto';
 import { UpdateDeviceDto } from './dto/update-device.dto';
 import { UpdateDeviceStatusDto } from './dto/update-device-status.dto';
 import { TestConnectionDto } from './dto/test-connection.dto';
+import { SetDeviceConfigurationDto } from './dto/set-device-configuration.dto';
 import { CombinedAuthGuard } from '../auth/combined-auth.guard';
 import { PermissionGuard } from '../auth/guards/permission.guard';
 import { RequirePermission } from '../common/decorators/require-permission.decorator';
@@ -41,6 +43,24 @@ export class DevicesController {
   @RequirePermission('device:view')
   describe(@Param('deviceId', ParseUUIDPipe) deviceId: string, @CurrentUser() user: NormalizedUser) {
     return this.devicesService.describeForUser(deviceId, user.id);
+  }
+
+  /** getConfiguration (extensión Kronos): parámetros configurables con su valor actual. */
+  @Get(':deviceId/configuration')
+  @RequirePermission('device:view')
+  getConfiguration(@Param('deviceId', ParseUUIDPipe) deviceId: string, @CurrentUser() user: NormalizedUser) {
+    return this.devicesService.configurationForUser(deviceId, user.id);
+  }
+
+  /** setConfiguration: 400 inválido, 409 si está midiendo, 502 si el dispositivo no acepta el valor. */
+  @Put(':deviceId/configuration')
+  @RequirePermission('device:edit')
+  setConfiguration(
+    @Param('deviceId', ParseUUIDPipe) deviceId: string,
+    @Body() dto: SetDeviceConfigurationDto,
+    @CurrentUser() user: NormalizedUser,
+  ) {
+    return this.devicesService.configureForUser(deviceId, dto.values, user.id);
   }
 }
 

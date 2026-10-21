@@ -9,6 +9,7 @@ import { PermissionsModule } from '../permissions/permissions.module';
 import { ExperimentConfigService } from './core/experiment-config.service';
 import { ExperimentCatalogService } from './core/experiment-catalog.service';
 import { DeviceActivityService } from './core/device-activity.service';
+import { DeviceConfigurationService } from './core/device-configuration.service';
 import { ExperimentsController, ProjectExperimentsController } from './core/experiments.controller';
 import { CommonModule } from '../common/common.module';
 
@@ -33,7 +34,14 @@ import { CommonModule } from '../common/common.module';
     ExperimentConfigService,
     ExperimentCatalogService,
     DeviceActivityService,
+    DeviceConfigurationService,
   ],
-  exports: [DevicePluginRegistry, ExperimentConfigService, ExperimentCatalogService, DeviceActivityService],
+  exports: [
+    DevicePluginRegistry,
+    ExperimentConfigService,
+    ExperimentCatalogService,
+    DeviceActivityService,
+    DeviceConfigurationService,
+  ],
 })
 export class DevicePluginsModule {}

@@ -1,4 +1,5 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { DevicesService } from './devices.service';
 import { DevicePluginRegistry } from '../device-plugins/core/device-plugin.registry';
 import { HiokiIm3570Plugin } from '../device-plugins/plugins/hioki-im3570/hioki-im3570.plugin';
@@ -18,7 +19,11 @@ function setup() {
     measurement: { findFirst: jest.fn() },
   };
   const teamScope = { assertProjectInTeam: jest.fn(), projectWhereForUser: jest.fn(async () => ({})) };
-  return { service: new DevicesService(prisma as any, teamScope as any, registry), prisma };
+  const deviceConfiguration = { view: jest.fn(async (d) => ({ deviceId: d.id })), apply: jest.fn(async (d) => ({ deviceId: d.id })) };
+  return {
+    service: new DevicesService(prisma as any, teamScope as any, registry, deviceConfiguration as any),
+    prisma, deviceConfiguration,
+  };
 }
 
 describe('DevicesService (tipos por plugin)', () => {
@@ -45,7 +50,7 @@ describe('DevicesService (tipos por plugin)', () => {
 
   it('checkReachable delega en testConnection del plugin con { ip, port } (puerto por defecto del catálogo)', async () => {
     const registry = new DevicePluginRegistry([new HiokiIm3570Plugin(), new KronosMux16Plugin(), new SimulatedImpedancePlugin()]);
-    const service = new DevicesService({} as any, {} as any, registry);
+    const service = new DevicesService({} as any, {} as any, registry, {} as any);
     const hioki = jest.spyOn(registry.get('hioki-im3570'), 'testConnection').mockResolvedValue(true);
     const mux = jest.spyOn(registry.get('kronos-mux-16'), 'testConnection').mockResolvedValue(true);
     await expect(service.checkReachable('hioki-im3570', '10.0.0.5')).resolves.toBe(true);
@@ -72,6 +77,21 @@ describe('DevicesService (tipos por plugin)', () => {
     expect(out.service.sensors[0].sensorValues[0].lastMeasured).toBe('2026-10-20T10:00:00.000Z');
   });
 
+  it('configuración: 404 fuera del equipo; dentro, delega en DeviceConfigurationService', async () => {
+    const { service, prisma, deviceConfiguration } = setup();
+    prisma.device.findFirst.mockResolvedValueOnce(null);
+    await expect(service.configurationForUser('d1', 'u1')).rejects.toBeInstanceOf(NotFoundException);
+    prisma.device.findFirst.mockResolvedValueOnce(null);
+    await expect(service.configureForUser('d1', { rp: 1 }, 'u1')).rejects.toBeInstanceOf(NotFoundException);
+    expect(deviceConfiguration.view).not.toHaveBeenCalled();
+    expect(deviceConfiguration.apply).not.toHaveBeenCalled();
+    const row = { id: 'd2', type: 'sim-impedance' };
+    prisma.device.findFirst.mockResolvedValueOnce(row);
+    await service.configureForUser('d2', { rp: 1 }, 'u1');
+    expect(deviceConfiguration.apply).toHaveBeenCalledWith(row, { rp: 1 });
+    expect(prisma.device.findFirst).toHaveBeenLastCalledWith({ where: { id: 'd2', project: {} } });
+  });
+
   describe('updateInProject (tipo bloqueado si está en uso)', () => {
     it('rechaza cambiar el tipo si alguna configuración de tarea usa el dispositivo', async () => {
       const { service, prisma } = setup();
@@ -87,7 +107,7 @@ describe('DevicesService (tipos por plugin)', () => {
     it('al cambiar a un tipo sin dirección (no en uso) deja la IP en null', async () => {
       const { service, prisma } = setup();
       const out = await service.updateInProject('p1', 'd1', { type: 'sim-impedance', ip: '10.0.0.9' }, 'u1');
-      expect(out).toMatchObject({ type: 'sim-impedance', ip: null });
+      expect(out).toMatchObject({ type: 'sim-impedance', ip: null, configuration: Prisma.DbNull });
       expect(prisma.device.update).toHaveBeenCalled();
     });
 
@@ -95,6 +115,7 @@ describe('DevicesService (tipos por plugin)', () => {
       const { service, prisma } = setup();
       const out = await service.updateInProject('p1', 'd1', { type: 'hioki-im3570', name: 'Nuevo', ip: '10.0.0.7' }, 'u1');
       expect(out).toMatchObject({ name: 'Nuevo', ip: '10.0.0.7' });
+      expect(out).not.toHaveProperty('configuration');
       await service.updateInProject('p1', 'd1', { name: 'Otro' }, 'u1');
       expect(prisma.taskPreference.count).not.toHaveBeenCalled();
     });
