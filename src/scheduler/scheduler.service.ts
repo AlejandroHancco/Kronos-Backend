@@ -4,13 +4,13 @@ import { InjectQueue } from '@nestjs/bull';
 import type { Queue } from 'bull';
 import { PrismaService } from '../prisma/prisma.service';
 import { MeasurementsService } from '../measurements/measurements.service';
-import type { SweepRange } from '../device-plugins/core/acquisition';
 import { ExperimentConfigService } from '../device-plugins/core/experiment-config.service';
 import { KronosGateway } from '../gateway/kronos.gateway';
 import { MEASUREMENTS_QUEUE } from '../queue/queue.constants';
 import {
   MeasurementSchedulingService,
   MeasurementJobData,
+  ExecutionEstimate,
   PRIORITY_SCHEDULED,
 } from './scheduling.service';
 import { deviceIdsOf, runningJobDeviceIds } from './device-usage';
@@ -19,10 +19,10 @@ import { deviceIdsOf, runningJobDeviceIds } from './device-usage';
  * Cron que despacha los ScheduledJobs pendientes.
  * Corre cada minuto:
  *  1. Busca jobs 'pending' con startAt <= ahora
- *  2. Salta los que usan un dispositivo (analyzer/mux) ya ocupado por un job 'running'
- *  3. Publica cada job en la cola Bull 'measurements' con prioridad alta
+ *  2. Resuelve el experimento y valida los rangos (solo barridos); si falla, el job pasa a 'failed'
+ *  3. Salta los que usan un dispositivo (equipo de medición / selector de canal) ya ocupado por un job 'running'
+ *  4. Marca el job como 'running' y lo publica en la cola Bull 'measurements' con prioridad alta
  *     (o fallback directo sin Redis)
- *  4. Marca el job como 'running'
  *  5. Si tiene intervalMinutes y quedan repeticiones, crea el siguiente job
  *     con startAt = ahora + intervalMinutes y repeatCount - 1
  */
@@ -64,7 +64,12 @@ export class SchedulerService {
       const busyDevices = await this.getBusyDeviceIds();
 
       for (const job of dueJobs) {
-        await this.dispatchJob(job, now, busyDevices);
+        try {
+          await this.dispatchJob(job, now, busyDevices);
+        } catch (error) {
+          // Un job que falla no detiene el despacho de los demás en este tick
+          this.logger.error(`Job ${job.id}: error al despachar: ${error.message}`);
+        }
       }
     } catch (error) {
       this.logger.error(`Scheduler tick failed: ${error.message}`);
@@ -73,9 +78,18 @@ export class SchedulerService {
     }
   }
 
-  /** IDs de devices (analyzer + mux) usados por jobs con status 'running' */
+  /** IDs de dispositivos (equipo de medición + selector de canal) usados por jobs con status 'running' */
   private getBusyDeviceIds(): Promise<Set<string>> {
     return runningJobDeviceIds(this.prisma);
+  }
+
+  /** Marca un job pendiente como 'failed' registrando el motivo. */
+  private async failJob(jobId: number, reason: string) {
+    this.logger.warn(`Job ${jobId} marcado como failed: ${reason}`);
+    await this.prisma.scheduledJob.update({
+      where: { id: jobId },
+      data: { status: 'failed' },
+    });
   }
 
   private async dispatchJob(
@@ -92,33 +106,37 @@ export class SchedulerService {
     now: Date,
     busyDevices: Set<string>,
   ) {
-    // Configuración activa de la tarea (devices + rangos de frecuencia)
-    const preference = await this.prisma.taskPreference.findFirst({
-      where: { taskId: job.taskId },
-      orderBy: { createdAt: 'desc' },
-      include: { ranges: { orderBy: { order: 'asc' } } },
-    });
-
-    if (!preference || preference.ranges.length === 0 || job.channelNumbers.length === 0) {
-      this.logger.warn(
-        `Job ${job.id} sin preferencia/rangos/canales — marcando como failed`,
-      );
-      await this.prisma.scheduledJob.update({
-        where: { id: job.id },
-        data: { status: 'failed' },
-      });
+    if (job.channelNumbers.length === 0) {
+      await this.failJob(job.id, 'no tiene canales seleccionados');
       return;
     }
 
-    // 2. Conflicto de dispositivos: otro job corriendo usa el mismo analyzer/mux
-    if (deviceIdsOf(preference).some((id) => busyDevices.has(id))) {
+    // 1. Resolver el experimento y validar los rangos guardados ANTES de reclamar el job:
+    //    si algo falla aquí el job pasa a 'failed' y nunca queda 'running' bloqueando sus dispositivos.
+    //    Los rangos solo se exigen a sensores de barrido; una lectura puntual no lleva rangos.
+    let estimate: ExecutionEstimate | null;
+    try {
+      estimate = await this.schedulingService.resolveWithEstimate(job.taskId, job.channelNumbers.length);
+      if (estimate) this.experimentConfig.assertRanges(estimate.resolved, estimate.ranges);
+    } catch (error) {
+      await this.failJob(job.id, error.message);
+      return;
+    }
+    if (!estimate) {
+      await this.failJob(job.id, 'la tarea no tiene un equipo de medición asignado');
+      return;
+    }
+    const { resolved, ranges, estimatedSeconds } = estimate;
+
+    // 2. Conflicto de dispositivos: otro job corriendo usa el mismo equipo de medición o selector de canal
+    if (deviceIdsOf(resolved.preference).some((id) => busyDevices.has(id))) {
       this.logger.log(
         `Job ${job.id} pospuesto — dispositivo ocupado por otro job en ejecución`,
       );
       return; // queda 'pending'; se reintenta en el próximo tick
     }
 
-    // 4. Marcar como running (guard de idempotencia: solo si sigue pending)
+    // 3. Marcar como running (guard de idempotencia: solo si sigue pending)
     const claimed = await this.prisma.scheduledJob.updateMany({
       where: { id: job.id, status: 'pending' },
       data: { status: 'running' },
@@ -126,21 +144,7 @@ export class SchedulerService {
     if (claimed.count === 0) return; // otro proceso lo tomó
 
     // Reservar los devices para el resto del tick
-    deviceIdsOf(preference).forEach((id) => busyDevices.add(id));
-
-    const ranges: SweepRange[] = preference.ranges.map((r) => ({
-      start: Number(r.start),
-      stop: Number(r.stop),
-      points: r.points,
-      scale: r.scale,
-    }));
-
-    // Duración desde la adquisición del dispositivo de medición; si el experimento ya no resuelve
-    // (tipo de dispositivo cambiado, etc.), se mantiene el fallback histórico de 60 s.
-    const resolved = await this.experimentConfig.resolve(job.taskId);
-    const estimatedSeconds = resolved
-      ? this.schedulingService.estimateSeconds(resolved.acquisition, ranges, job.channelNumbers.length, !!resolved.selector)
-      : 60;
+    deviceIdsOf(resolved.preference).forEach((id) => busyDevices.add(id));
 
     const payload: MeasurementJobData = {
       taskId: job.taskId,
@@ -153,7 +157,7 @@ export class SchedulerService {
       executionIndex: job.executionIndex,
     };
 
-    // 3. Publicar en la cola Bull con prioridad alta (o fallback directo si no hay Redis)
+    // 4. Publicar en la cola Bull con prioridad alta (o fallback directo si no hay Redis)
     if (this.measurementQueue) {
       await this.measurementQueue.add('execute', payload, {
         attempts: 3,

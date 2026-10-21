@@ -8,7 +8,7 @@ import { estimateAcquisitionSeconds } from '../device-plugins/core/acquisition';
 import { KronosGateway } from '../gateway/kronos.gateway';
 import { MEASUREMENTS_QUEUE } from '../queue/queue.constants';
 import { PrefDevices, sharesDevice } from './device-usage';
-import { ExperimentConfigService } from '../device-plugins/core/experiment-config.service';
+import { ExperimentConfigService, ResolvedExperiment, toSweepRanges } from '../device-plugins/core/experiment-config.service';
 
 /** Payload de los jobs de la cola 'measurements' */
 export interface MeasurementJobData {
@@ -22,6 +22,13 @@ export interface MeasurementJobData {
   /** Presentes solo cuando la medición proviene de un ScheduledJob */
   scheduledJobId?: number;
   executionIndex?: number;
+}
+
+/** Experimento resuelto + duración estimada de una ejecución (ver resolveWithEstimate). */
+export interface ExecutionEstimate<R extends { points: number } = SweepRange> {
+  resolved: ResolvedExperiment;
+  ranges: R[];
+  estimatedSeconds: number;
 }
 
 export interface AvailabilityResult {
@@ -79,6 +86,24 @@ export class MeasurementSchedulingService {
     return estimateAcquisitionSeconds(acquisition, ranges, channelCount, hasSelector);
   }
 
+  /**
+   * Resuelve el experimento activo de la tarea y estima la duración de una ejecución.
+   * Compartido por la admisión manual (checkAvailability) y el cron de ScheduledJobs.
+   * Sin `ranges` usa los rangos guardados en la configuración de la tarea.
+   * null = la tarea no tiene equipo de medición asignado; los BadRequestException de resolve se propagan.
+   */
+  async resolveWithEstimate<R extends { points: number } = SweepRange>(
+    taskId: number,
+    channelCount: number,
+    ranges?: R[],
+  ): Promise<ExecutionEstimate<R> | null> {
+    const resolved = await this.experimentConfig.resolve(taskId);
+    if (!resolved) return null;
+    const used = ranges ?? (toSweepRanges(resolved.preference.ranges) as unknown as R[]);
+    const estimatedSeconds = this.estimateSeconds(resolved.acquisition, used, channelCount, !!resolved.selector);
+    return { resolved, ranges: used, estimatedSeconds };
+  }
+
   /** Segundos de trabajo pendiente/activo en la cola (o en memoria sin Redis) */
   async getBacklogSeconds(): Promise<number> {
     if (this.measurementQueue) {
@@ -99,7 +124,7 @@ export class MeasurementSchedulingService {
    * ¿Se puede aceptar esta medición ahora?
    * 1. Backlog + estimación no debe superar el máximo.
    * 2. No debe terminar chocando con un ScheduledJob pendiente
-   *    que use los mismos dispositivos (analyzer/mux) dentro del horizonte.
+   *    que use los mismos dispositivos (equipo de medición / selector de canal) dentro del horizonte.
    */
   async checkAvailability(
     taskId: number,
@@ -112,8 +137,8 @@ export class MeasurementSchedulingService {
     // antes de poder medir — se valida aquí para que el 400 llegue de inmediato
     // en la respuesta HTTP, no minutos después cuando el worker ya lo intentó.
     // De paso resuelve el experimento: la duración depende de la adquisición del sensor.
-    const resolved = await this.experimentConfig.resolve(taskId);
-    if (!resolved) {
+    const estimate = await this.resolveWithEstimate(taskId, selectedChannels.length, ranges);
+    if (!estimate) {
       return {
         estimatedSeconds: 0,
         backlogSeconds,
@@ -124,7 +149,7 @@ export class MeasurementSchedulingService {
       };
     }
 
-    const estimatedSeconds = this.estimateSeconds(resolved.acquisition, ranges, selectedChannels.length, !!resolved.selector);
+    const { estimatedSeconds } = estimate;
     const base = {
       estimatedSeconds,
       backlogSeconds,
@@ -244,7 +269,7 @@ export class MeasurementSchedulingService {
 
   /**
    * Busca un ScheduledJob 'pending' cuyo startAt caiga dentro del horizonte
-   * y cuya tarea comparta analyzer/mux con la tarea dada.
+   * y cuya tarea comparta equipo de medición o selector de canal con la tarea dada.
    */
   private async findScheduledConflict(
     taskId: number,
