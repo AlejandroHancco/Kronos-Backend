@@ -57,9 +57,15 @@ describe('sim-spectrum', () => {
   });
 
   it('spectrumAt: pico se desplaza con el seed', () => {
-    const a = spectrumAt(1.5e6, 1e6, 2e6, 'a');
-    const b = spectrumAt(1.5e6, 1e6, 2e6, 'b');
-    expect(typeof a).toBe('number');
-    expect(typeof b).toBe('number');
+    const start = 1e6, stop = 2e6;
+    const grid = Array.from({ length: 401 }, (_, i) => start + (stop - start) * (i / 400));
+    const peakXFor = (seed: string) =>
+      grid.reduce((best, f) => (spectrumAt(f, start, stop, seed) > spectrumAt(best, start, stop, seed) ? f : best), grid[0]);
+
+    expect(peakXFor('a')).not.toBe(peakXFor('b'));
+
+    const valuesA1 = grid.map((f) => spectrumAt(f, start, stop, 'a'));
+    const valuesA2 = grid.map((f) => spectrumAt(f, start, stop, 'a'));
+    expect(valuesA2).toEqual(valuesA1);
   });
 });
