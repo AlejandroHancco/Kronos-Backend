@@ -2,7 +2,7 @@ import * as net from 'net';
 
 export interface LineSocketOptions { connectTimeoutMs?: number; terminator?: '\n' | '\r\n' }
 
-interface PendingRead { resolve: (line: string) => void; reject: (err: Error) => void; timer: NodeJS.Timeout }
+interface PendingRead { resolve: (line: string | null) => void; reject: (err: Error) => void; timer: NodeJS.Timeout }
 
 /** Socket TCP orientado a líneas: lectura hasta \n (ignorando \r), con cola de líneas y timeouts por lectura. */
 export class LineSocket {
@@ -42,15 +42,39 @@ export class LineSocket {
     const queued = this.lines.shift();
     if (queued !== undefined) return Promise.resolve(queued);
     if (this.failure) return Promise.reject(this.failure);
-    return new Promise((resolve, reject) => {
+    return new Promise<string>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.waiter = null;
         this.failure = new Error('Tiempo de espera agotado esperando respuesta');
         this.socket.destroy();
         reject(this.failure);
       }, timeoutMs);
+      this.waiter = { resolve: resolve as (line: string | null) => void, reject, timer };
+    });
+  }
+
+  /**
+   * Como readLine, pero al vencer devuelve null SIN envenenar la conexión (para reintentos del
+   * llamador, p. ej. reenviar `++read eoi` a un adaptador GPIB). Una línea tardía queda en la cola.
+   */
+  waitLine(timeoutMs: number): Promise<string | null> {
+    if (this.waiter) return Promise.reject(new Error('Ya hay una lectura en curso'));
+    const queued = this.lines.shift();
+    if (queued !== undefined) return Promise.resolve(queued);
+    if (this.failure) return Promise.reject(this.failure);
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.waiter = null;
+        resolve(null);
+      }, timeoutMs);
       this.waiter = { resolve, reject, timer };
     });
+  }
+
+  /** Marca la conexión como inutilizable (rechaza lo pendiente y las lecturas futuras) y la cierra. */
+  abort(error: Error): void {
+    this.fail(error);
+    this.socket.destroy();
   }
 
   close(): void {

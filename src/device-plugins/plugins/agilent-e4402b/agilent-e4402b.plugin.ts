@@ -17,14 +17,14 @@ type SweepRequest = Extract<AcquisitionRequest, { kind: 'sweep' }>;
 const RBW_MIN = 1000;
 const RBW_MAX = 5_000_000;
 
-/** Comandos de setup de un barrido (ESA-E, SCPI). Puntos: solo si la declaración permite variarlos. */
+/** Comandos de setup de un barrido (ESA-E, SCPI). `:SWE:POIN` siempre: el panel puede tener otro valor aunque la declaración lo fije. */
 export function e4402bSweepCommands(r: SweepRequest, cfg: ConfigurationValues): string[] {
   const rbw = String(cfg.resolutionBandwidth ?? 'AUTO');
   return [
     ':INIT:CONT OFF',
     `:FREQ:STAR ${r.start}`,
     `:FREQ:STOP ${r.stop}`,
-    ...(ACQUISITION.points.minimum !== ACQUISITION.points.maximum ? [`:SWE:POIN ${r.points}`] : []),
+    `:SWE:POIN ${r.points}`,
     rbw === 'AUTO' ? ':BAND:AUTO ON' : `:BAND ${rbw}`,
     `:DISP:WIND:TRAC:Y:RLEV ${Number(cfg.referenceLevel ?? 0)}`,
     ':FORM ASC',
@@ -76,9 +76,20 @@ export class AgilentE4402bPlugin implements SensorPlugin {
       : PrologixScpi.open(device.ip!, port, Number(device.configuration.gpibAddress ?? 18));
   }
 
-  /** Espera de *OPC?: 3 × el barrido estimado, al menos 10 s. */
+  /** Espera de *OPC? sin el tiempo real del barrido: 3 × el barrido estimado por puntos, al menos 10 s. */
   opcTimeoutMs(points: number): number {
     return Math.max(10_000, Math.ceil(points * ACQUISITION.secondsPerPoint * 3 * 1000));
+  }
+
+  /**
+   * Espera de *OPC? desde el tiempo de barrido que calcula el equipo (`:SWE:TIME?`, segundos; depende
+   * del RBW y del span): max(10 s, 3 × barrido + 5 s). Si la consulta falla o no es un número finito,
+   * cae a la estimación por puntos.
+   */
+  async sweepOpcTimeoutMs(t: ScpiTransport, points: number): Promise<number> {
+    const seconds = parseFloat(await t.query(':SWE:TIME?', 5000).catch(() => ''));
+    if (!Number.isFinite(seconds) || seconds < 0) return this.opcTimeoutMs(points);
+    return Math.max(10_000, Math.ceil(3 * seconds * 1000 + 5000));
   }
 
   async getSensorData(device: DeviceContext, request: AcquisitionRequest): Promise<MeasuredPoint[]> {
@@ -87,7 +98,7 @@ export class AgilentE4402bPlugin implements SensorPlugin {
     const t = await this.openTransport(device, PROLOGIX_PORT);
     try {
       for (const cmd of e4402bSweepCommands(request, device.configuration)) await t.write(cmd);
-      await t.query(':INIT:IMM;*OPC?', this.opcTimeoutMs(request.points));
+      await t.query(':INIT:IMM;*OPC?', await this.sweepOpcTimeoutMs(t, request.points));
       const amplitudes = parseTrace(await t.query(':TRAC? TRACE1'));
       if (amplitudes.length !== request.points || amplitudes.some((a) => !Number.isFinite(a))) {
         throw new Error(`El E4402B devolvió ${amplitudes.length} puntos; se esperaban ${request.points}`);

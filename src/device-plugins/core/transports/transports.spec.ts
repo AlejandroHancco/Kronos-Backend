@@ -53,9 +53,36 @@ describe('transports', () => {
     await t.write(':INIT:CONT OFF');
     await expect(t.query('*OPC?')).resolves.toBe('1');
     expect(srv.received).toEqual([
-      '++mode 1', '++addr 18', '++auto 0', '++eoi 1', '++eos 2', ':INIT:CONT OFF', '*OPC?', '++read eoi',
+      '++mode 1', '++addr 18', '++auto 0', '++eoi 1', '++eos 2', '++read_tmo_ms 3000', ':INIT:CONT OFF', '*OPC?', '++read eoi',
     ]);
     t.close(); srv.close();
+  });
+  it('PrologixScpi: si el adaptador agota su espera de lectura, reenvía ++read eoi hasta el timeout del llamador', async () => {
+    let reads = 0;
+    const srv = await fakeServer((l) => (l === '++read eoi' && ++reads === 2 ? '1' : null));
+    const t = await PrologixScpi.open('127.0.0.1', srv.port, 18, { readWindowMs: 100 });
+    await expect(t.query('*OPC?', 2000)).resolves.toBe('1');
+    expect(srv.received.slice(-3)).toEqual(['*OPC?', '++read eoi', '++read eoi']);
+    // la conexión sigue utilizable
+    await t.write(':INIT:CONT OFF');
+    t.close(); srv.close();
+  });
+  it('PrologixScpi: sin respuesta tras varios ++read eoi, vence con el timeout del llamador', async () => {
+    const srv = await fakeServer(() => null);
+    const t = await PrologixScpi.open('127.0.0.1', srv.port, 18, { readWindowMs: 50 });
+    const start = Date.now();
+    await expect(t.query('*OPC?', 300)).rejects.toThrow('Tiempo de espera agotado');
+    expect(Date.now() - start).toBeLessThan(1000);
+    expect(srv.received.filter((l) => l === '++read eoi').length).toBeGreaterThanOrEqual(2);
+    t.close(); srv.close();
+  });
+  it('LineSocket.waitLine: null al vencer sin envenenar la conexión', async () => {
+    const srv = await fakeServer((l) => (l === 'go' ? 'ok' : null));
+    const s = await LineSocket.open('127.0.0.1', srv.port);
+    await expect(s.waitLine(50)).resolves.toBeNull();
+    s.send('go\n');
+    await expect(s.waitLine(500)).resolves.toBe('ok');
+    s.close(); srv.close();
   });
   it('PrologixScpi: adaptador inaccesible', async () => {
     await expect(PrologixScpi.open('127.0.0.1', 1, 18, { connectTimeoutMs: 200 }))
