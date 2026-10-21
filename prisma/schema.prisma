@@ -29,6 +29,7 @@ model Device {
   analyzerTaskPreferences TaskPreference[] @relation("analyzerDevice")
   muxTaskPreferences      TaskPreference[] @relation("muxDevice")
   status                  DeviceStatus       @default(offline)
+  configuration           Json?
 
   @@map("devices")
   @@schema("platform")
