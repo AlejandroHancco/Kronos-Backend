@@ -22,6 +22,7 @@ describe('ExperimentConfigService.resolve', () => {
     expect(r.selector!.plugin).toBe(registry.get('kronos-mux-16'));
     expect(r.channelRange).toEqual({ min: 1, max: 16 });
     expect(r.valueMetas.map((v) => v.name)).toEqual(['z']);
+    expect(r.experiment.fullName).toBe('Simulador (Randles) + MUX Kronos 16');
   });
 
   it('sin selector: canal 1', async () => {
@@ -47,7 +48,15 @@ describe('ExperimentConfigService.summarize', () => {
       .toMatchObject({ channelRange: { min: 1, max: 16 }, simulated: false });
     expect(s.summarize({ analyzerDevice: { type: 'hioki-im3570' }, muxDevice: { type: 'mux' } }).channelRange).toEqual({ min: 1, max: 1 });
     expect(s.summarize({ analyzerDevice: { type: 'analyzer' }, muxDevice: null })).toEqual({
-      channelRange: { min: 1, max: 1 }, sensorValues: [], simulated: false,
+      channelRange: { min: 1, max: 1 }, sensorValues: [], simulated: false, experiment: null,
     });
+  });
+
+  it('experimento con nombre por tipos; tipo desconocido → null', () => {
+    expect(s.summarize({ analyzerDevice: { type: 'hioki-im3570' }, muxDevice: { type: 'kronos-mux-16' } }).experiment)
+      .toEqual({ experimentId: 'hioki-im3570+kronos-mux-16', fullName: 'Hioki IM3570 + MUX Kronos 16' });
+    expect(s.summarize({ analyzerDevice: { type: 'hioki-im3570' }, muxDevice: null }).experiment)
+      .toEqual({ experimentId: 'hioki-im3570', fullName: 'Hioki IM3570' });
+    expect(s.summarize({ analyzerDevice: { type: 'hioki-im3570' }, muxDevice: { type: 'mux' } }).experiment).toBeNull();
   });
 });

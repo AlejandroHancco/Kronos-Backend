@@ -13,6 +13,7 @@ import {
   channelRangeMessage,
   valueMetasOf,
 } from './experiment-config';
+import { ExperimentDefinition, experimentFor } from './experiments';
 
 export interface ResolvedExperiment {
   preference: TaskPreference & { analyzerDevice: Device; muxDevice: Device | null; ranges: TaskPreferenceRange[] };
@@ -26,6 +27,7 @@ export interface ResolvedExperiment {
   } | null;
   channelRange: ChannelRange;
   valueMetas: MeasurementValueMeta[];
+  experiment: ExperimentDefinition;
 }
 
 const mismatch = (d: { name: string; type: string | null }, what: string) =>
@@ -90,6 +92,7 @@ export class ExperimentConfigService {
       selector,
       channelRange: channelRangeFor(selector?.description ?? null),
       valueMetas: valueMetasOf(sensorDescription),
+      experiment: experimentFor(this.registry.catalog(), s.type, m?.type ?? null)!,
     };
   }
 
@@ -106,10 +109,12 @@ export class ExperimentConfigService {
     const m = pref.muxDevice;
     const selectorDescription = m && this.registry.role(m.type) === 'channel-selector' ? this.registry.describe(m.type!) : null;
     const channelRange = channelRangeFor(selectorDescription);
+    const found = experimentFor(this.registry.catalog(), pref.analyzerDevice.type, m?.type ?? null);
+    const experiment = found ? { experimentId: found.experimentId, fullName: found.fullName } : null;
     if (this.registry.role(pref.analyzerDevice.type) !== 'sensor') {
-      return { channelRange, sensorValues: [], simulated: false };
+      return { channelRange, sensorValues: [], simulated: false, experiment };
     }
     const d = this.registry.describe(pref.analyzerDevice.type!);
-    return { channelRange, sensorValues: valueMetasOf(d), simulated: d.simulated };
+    return { channelRange, sensorValues: valueMetasOf(d), simulated: d.simulated, experiment };
   }
 }

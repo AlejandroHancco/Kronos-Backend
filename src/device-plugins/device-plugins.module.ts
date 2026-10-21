@@ -7,6 +7,9 @@ import { DevicePluginsController } from './device-plugins.controller';
 import { PrismaModule } from '../prisma/prisma.module';
 import { PermissionsModule } from '../permissions/permissions.module';
 import { ExperimentConfigService } from './core/experiment-config.service';
+import { ExperimentCatalogService } from './core/experiment-catalog.service';
+import { ExperimentsController, ProjectExperimentsController } from './core/experiments.controller';
+import { CommonModule } from '../common/common.module';
 
 /**
  * Módulo del Kronos Watcher dedicado a dispositivos: registra los plugins de cada
@@ -16,8 +19,8 @@ import { ExperimentConfigService } from './core/experiment-config.service';
  */
 @Global()
 @Module({
-  imports: [PrismaModule, PermissionsModule],
-  controllers: [DevicePluginsController],
+  imports: [PrismaModule, PermissionsModule, CommonModule],
+  controllers: [DevicePluginsController, ExperimentsController, ProjectExperimentsController],
   providers: [
     ...DEVICE_PLUGINS,
     {
@@ -27,7 +30,8 @@ import { ExperimentConfigService } from './core/experiment-config.service';
     },
     DevicePluginRegistry,
     ExperimentConfigService,
+    ExperimentCatalogService,
   ],
-  exports: [DevicePluginRegistry, ExperimentConfigService],
+  exports: [DevicePluginRegistry, ExperimentConfigService, ExperimentCatalogService],
 })
 export class DevicePluginsModule {}
