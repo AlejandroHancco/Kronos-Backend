@@ -3,7 +3,7 @@
   "fullName": "Impedancímetro simulado (Randles)",
   "shortName": "Simulador (Randles)",
   "manufacturer": "Kronos (simulación)",
-  "description": "SIMULADO: genera |Z|(f) de un modelo Rs + (Rp ‖ C) con ruido; no requiere hardware ni MUX",
+  "description": "SIMULADO: genera |Z|(f) de un modelo Rs + (Rp ‖ C) con ruido; no requiere hardware",
   "simulated": true,
   "connection": { "requiresIp": false },
   "sensors": [

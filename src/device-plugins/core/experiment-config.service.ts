@@ -11,6 +11,7 @@ import {
   experimentConfigError,
   invalidChannels,
   channelRangeMessage,
+  typeLabel,
   valueMetasOf,
 } from './experiment-config';
 import { ExperimentDefinition, experimentFor } from './experiments';
@@ -31,7 +32,7 @@ export interface ResolvedExperiment {
 }
 
 const mismatch = (d: { name: string; type: string | null }, what: string) =>
-  `La configuración de la tarea usa "${d.name}" (tipo "${d.type}"), que no es ${what} registrado; revisa la configuración`;
+  `La configuración de la tarea usa "${d.name}" (${typeLabel(d.type)}), que no es ${what} registrado; revisa la configuración`;
 
 @Injectable()
 export class ExperimentConfigService {

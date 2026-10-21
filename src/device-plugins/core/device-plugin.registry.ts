@@ -86,7 +86,7 @@ export class DevicePluginRegistry {
 
   private entry(deviceType: string | null | undefined): Registered {
     const entry = deviceType ? this.types.get(deviceType) : undefined;
-    if (!entry) throw new NotFoundException(`No hay un device plugin registrado para el tipo "${deviceType}"`);
+    if (!entry) throw new NotFoundException(`No hay un device plugin registrado para ${deviceType ? `el tipo "${deviceType}"` : 'un dispositivo sin tipo'}`);
     return entry;
   }
 

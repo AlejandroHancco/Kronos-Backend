@@ -125,7 +125,7 @@ export class MeasurementSchedulingService {
       maxBacklogSeconds: this.maxBacklogSeconds,
     };
 
-    // Regla 0: la tarea necesita un analyzer y un MUX asignados (TaskPreference)
+    // Regla 0: la tarea necesita un equipo de medición asignado (TaskPreference; el MUX es opcional)
     // antes de poder medir — se valida aquí para que el 400 llegue de inmediato
     // en la respuesta HTTP, no minutos después cuando el worker ya lo intentó.
     const hasPreference = await this.prisma.taskPreference.findFirst({

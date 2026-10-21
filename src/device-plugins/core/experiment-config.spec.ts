@@ -41,6 +41,8 @@ describe('experimentConfigError', () => {
     expect(experimentConfigError({ taskProjectId: 'P', sensor: dev('kronos-mux-16'), sensorRole: 'channel-selector', selector: null }))
       .toMatch(/no es un equipo de medición/);
     expect(experimentConfigError({ taskProjectId: 'P', sensor: dev('raro'), selector: null })).toMatch(/no es un equipo de medición/);
+    expect(experimentConfigError({ taskProjectId: 'P', sensor: { ...dev('x'), type: null }, selector: null }))
+      .toBe('El dispositivo "x" no es un equipo de medición registrado (sin tipo)');
   });
 
   it('sensor sin sensorValues declarados', () => {

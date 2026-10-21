@@ -61,8 +61,11 @@ export class HiokiIm3570Plugin implements SensorPlugin {
 
   /** "getSensorData": envía el setup del barrido, consulta :MEASure? y lee la respuesta hasta \n. */
   getSensorData(device: DeviceContext, sweep: SweepParams): Promise<MeasuredPoint[]> {
+    // Sin IP, net.createConnection usaría localhost: fallar antes con un mensaje claro.
+    if (!device.ip) return Promise.reject(new Error(`El equipo "${device.name}" no tiene IP configurada`));
+    const host = device.ip;
     return new Promise((resolve, reject) => {
-      const socket = net.createConnection({ host: device.ip ?? '', port: HIOKI_SCPI_PORT }, () => {
+      const socket = net.createConnection({ host, port: HIOKI_SCPI_PORT }, () => {
         socket.setTimeout(60000);
 
         (async () => {

@@ -1,6 +1,9 @@
 import type { DeviceRole, DeviceServiceDescription } from './device-plugin.interface';
 
 export const CHANNEL_SLOTS = 16;
+
+/** `tipo "x"` para mensajes; los dispositivos sin tipo dicen "sin tipo" en vez de `tipo "null"`. */
+export const typeLabel = (type: string | null | undefined) => (type ? `tipo "${type}"` : 'sin tipo');
 export interface MeasurementValueMeta { name: string; unit: string; label?: string }
 export interface ChannelRange { min: number; max: number }
 export interface ConfigDevice { id: string; name: string; type: string | null; projectId: string }
@@ -20,12 +23,12 @@ export function experimentConfigError(a: {
   const { sensor, selector, sensorDescription: d } = a;
   if (sensor.projectId !== a.taskProjectId) return 'El equipo de medición no pertenece al proyecto de la tarea';
   if (a.sensorRole !== 'sensor' || !d) {
-    return `El dispositivo "${sensor.name}" no es un equipo de medición registrado (tipo "${sensor.type}")`;
+    return `El dispositivo "${sensor.name}" no es un equipo de medición registrado (${typeLabel(sensor.type)})`;
   }
   if (valueMetasOf(d).length === 0) return `"${d.fullName}" no declara valores de sensor`;
   if (selector) {
     if (a.selectorRole !== 'channel-selector') {
-      return `El dispositivo "${selector.name}" no es un selector de canal registrado (tipo "${selector.type}")`;
+      return `El dispositivo "${selector.name}" no es un selector de canal registrado (${typeLabel(selector.type)})`;
     }
     if (selector.projectId !== a.taskProjectId) return 'El MUX no pertenece al proyecto de la tarea';
   }

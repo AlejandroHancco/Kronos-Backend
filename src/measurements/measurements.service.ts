@@ -223,7 +223,7 @@ export class MeasurementsService {
       release = await this.deviceActivity.beginMeasurement([sensor.context.id, ...(selector ? [selector.context.id] : [])]);
 
       this.logger.log(
-          `Experiment - Sensor: ${sensor.context.name} (${taskPreference.analyzerDevice.type}), selector: ${selector ? `${selector.context.name} (${mux?.type})` : 'sin selector'}, canales ${channelRange.min}-${channelRange.max}, valores [${valueNames.join(', ')}]`,
+          `Experiment - Sensor: ${sensor.context.name} (${taskPreference.analyzerDevice.type}), selector: ${selector ? `${selector.context.name} (${selector.description.deviceType})` : 'sin selector'}, canales ${channelRange.min}-${channelRange.max}, valores [${valueNames.join(', ')}]`,
       );
 
       this.logger.log(
