@@ -35,11 +35,11 @@ export class SchedulerService {
     private prisma: PrismaService,
     private measurementsService: MeasurementsService,
     private schedulingService: MeasurementSchedulingService,
-    private experimentConfig: ExperimentConfigService,
     private kronosGateway: KronosGateway,
     @Optional()
     @InjectQueue(MEASUREMENTS_QUEUE)
-    private measurementQueue?: Queue<MeasurementJobData>,
+    private measurementQueue: Queue<MeasurementJobData> | undefined,
+    private experimentConfig: ExperimentConfigService,
   ) {}
 
   @Cron(CronExpression.EVERY_MINUTE)
