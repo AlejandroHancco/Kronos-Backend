@@ -1,10 +1,10 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { Device, TaskPreference, TaskPreferenceRange } from '@prisma/client';
+import { Device, Prisma, TaskPreference, TaskPreferenceRange } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { DevicePluginRegistry } from './device-plugin.registry';
 import type { ActuatorPlugin, DeviceContext, DeviceServiceDescription, SensorPlugin } from './device-plugin.interface';
 import { toDeviceContext } from './configuration';
-import { AcquisitionMetadata, acquisitionOf } from './acquisition';
+import { AcquisitionMetadata, acquisitionOf, rangesError, SweepRange } from './acquisition';
 import {
   ChannelRange,
   MeasurementValueMeta,
@@ -36,11 +36,15 @@ export interface ResolvedExperiment {
 const mismatch = (d: { name: string; type: string | null }, what: string) =>
   `La configuración de la tarea usa "${d.name}" (${typeLabel(d.type)}), que no es ${what} registrado; revisa la configuración`;
 
+/** Rangos guardados (Decimal de Prisma) → SweepRange numérico, para validar contra la adquisición del sensor. */
+export const toSweepRanges = (rows: { start: Prisma.Decimal | number; stop: Prisma.Decimal | number; points: number; scale: string }[]): SweepRange[] =>
+  rows.map((r) => ({ start: Number(r.start), stop: Number(r.stop), points: r.points, scale: r.scale }));
+
 @Injectable()
 export class ExperimentConfigService {
   constructor(private prisma: PrismaService, private registry: DevicePluginRegistry) {}
 
-  async assertValidConfig(taskId: number, sensorDeviceId: string, channelSelectorDeviceId: string | null): Promise<void> {
+  async assertValidConfig(taskId: number, sensorDeviceId: string, channelSelectorDeviceId: string | null, ranges: SweepRange[]): Promise<void> {
     const task = await this.prisma.task.findUnique({ where: { id: taskId }, select: { projectId: true } });
     if (!task) throw new NotFoundException('Task not found');
     const sensor = await this.prisma.device.findUnique({ where: { id: sensorDeviceId } });
@@ -56,6 +60,15 @@ export class ExperimentConfigService {
       selectorRole: selector ? this.registry.role(selector.type) : undefined,
       sensorDescription: sensorRole === 'sensor' ? this.registry.describe(sensor.type!) : undefined,
     });
+    if (error) throw new BadRequestException(error);
+    const d = this.registry.describe(sensor.type!);
+    const rangeError = rangesError(acquisitionOf(d)!, ranges, d.shortName);
+    if (rangeError) throw new BadRequestException(rangeError);
+  }
+
+  /** Rangos de barrido contra la adquisición ya resuelta del sensor (usado por measureTask). */
+  assertRanges(resolved: ResolvedExperiment, ranges: SweepRange[]): void {
+    const error = rangesError(resolved.acquisition, ranges, resolved.sensor.description.shortName);
     if (error) throw new BadRequestException(error);
   }
 

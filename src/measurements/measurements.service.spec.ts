@@ -14,7 +14,7 @@ function setup(resolved?: any) {
   const notifications = {
     notifyTeamMeasurementSuccess: jest.fn(), notifyTeamMeasurementWarning: jest.fn(), notifyTeamMeasurementFailed: jest.fn(),
   };
-  const experimentConfig = { assertChannels: jest.fn(async () => resolved) };
+  const experimentConfig = { assertChannels: jest.fn(async () => resolved), assertRanges: jest.fn() };
   const release = jest.fn();
   const deviceActivity = { beginMeasurement: jest.fn(async () => release) };
   const service = new MeasurementsService(
@@ -127,6 +127,21 @@ describe('MeasurementsService.measureTask (sensor + selector de canal)', () => {
     await service.measureTask(1, 'u1', { ranges, selectedChannels: [1] });
     expect(deviceActivity.beginMeasurement).toHaveBeenCalledWith(['s1', 'm1']);
     expect(release).toHaveBeenCalledTimes(1);
+  });
+
+  it('rango fuera de los límites del sensor: falla antes de tocar el plugin, con el mismo mensaje', async () => {
+    const { resolved, sensorPlugin } = resolvedWith([], false);
+    const { service, prisma } = setup(resolved);
+    const badRanges = [{ start: 100, stop: 200, points: 2, scale: 'LOG' }]; // fuera de rangeMaximum: 10
+    const message = 'Sim mide Frecuencia entre 1 Hz y 10 Hz';
+    (service as any).experimentConfig.assertRanges = jest.fn(() => {
+      throw new BadRequestException(message);
+    });
+    await expect(service.measureTask(1, 'u1', { ranges: badRanges, selectedChannels: [1] })).rejects.toThrow(
+      new BadRequestException(message),
+    );
+    expect(sensorPlugin.getSensorData).not.toHaveBeenCalled();
+    expect(prisma.measurement.create).not.toHaveBeenCalled();
   });
 
   it('libera los dispositivos aunque getSensorData o el guardado fallen', async () => {

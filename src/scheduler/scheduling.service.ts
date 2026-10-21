@@ -3,7 +3,8 @@ import { InjectQueue } from '@nestjs/bull';
 import type { Queue } from 'bull';
 import { PrismaService } from '../prisma/prisma.service';
 import { MeasurementsService } from '../measurements/measurements.service';
-import type { SweepRange } from '../device-plugins/core/acquisition';
+import type { AcquisitionMetadata, SweepRange } from '../device-plugins/core/acquisition';
+import { estimateAcquisitionSeconds } from '../device-plugins/core/acquisition';
 import { KronosGateway } from '../gateway/kronos.gateway';
 import { MEASUREMENTS_QUEUE } from '../queue/queue.constants';
 import { PrefDevices, sharesDevice } from './device-usage';
@@ -37,14 +38,6 @@ export interface AvailabilityResult {
   nextScheduledAt?: Date;
 }
 
-// ── Modelo ADITIVO de duración ────────────────────────────────────────────────
-// total = canales × [ T_MUX + Σ_rangos (T_SETUP + puntos × T_PUNTO) ]
-// Cada canal repite todos los rangos (así mide measureTask), por eso es aditivo:
-// más canales o más rangos ⇒ más tiempo, linealmente.
-const MUX_SWITCH_SECONDS = 1.5; // cambio de canal en el MUX (HTTP + asentamiento)
-const RANGE_SETUP_SECONDS = 1;  // comandos SCPI de setup por rango (6 × 100ms + margen)
-const SECONDS_PER_POINT = 0.01; // barrido: ~8s para 801 puntos
-
 // Prioridades Bull (menor = más prioritario): los jobs programados van primero
 export const PRIORITY_SCHEDULED = 1;
 export const PRIORITY_MANUAL = 10;
@@ -76,18 +69,14 @@ export class MeasurementSchedulingService {
     private measurementQueue?: Queue<MeasurementJobData>,
   ) {}
 
-  /** Estimación aditiva: canales × (mux + Σ rangos(setup + puntos·t)) */
+  /** Estimación aditiva (ver acquisition.ts): canales × (cambio de canal + Σ rangos(setup + puntos·t)), desde la adquisición del dispositivo de medición. */
   estimateSeconds(
+    acquisition: AcquisitionMetadata,
     ranges: { points: number }[],
     channelCount: number,
+    hasSelector: boolean,
   ): number {
-    const perChannel =
-      MUX_SWITCH_SECONDS +
-      ranges.reduce(
-        (sum, r) => sum + RANGE_SETUP_SECONDS + r.points * SECONDS_PER_POINT,
-        0,
-      );
-    return Math.ceil(channelCount * perChannel);
+    return estimateAcquisitionSeconds(acquisition, ranges, channelCount, hasSelector);
   }
 
   /** Segundos de trabajo pendiente/activo en la cola (o en memoria sin Redis) */
@@ -117,30 +106,30 @@ export class MeasurementSchedulingService {
     ranges: { points: number }[],
     selectedChannels: number[],
   ): Promise<AvailabilityResult> {
-    const estimatedSeconds = this.estimateSeconds(ranges, selectedChannels.length);
     const backlogSeconds = await this.getBacklogSeconds();
-
-    const base = {
-      estimatedSeconds,
-      backlogSeconds,
-      maxBacklogSeconds: this.maxBacklogSeconds,
-    };
 
     // Regla 0: la tarea necesita un equipo de medición asignado (TaskPreference; el MUX es opcional)
     // antes de poder medir — se valida aquí para que el 400 llegue de inmediato
     // en la respuesta HTTP, no minutos después cuando el worker ya lo intentó.
-    const hasPreference = await this.prisma.taskPreference.findFirst({
-      where: { taskId },
-      select: { id: true },
-    });
-    if (!hasPreference) {
+    // De paso resuelve el experimento: la duración depende de la adquisición del sensor.
+    const resolved = await this.experimentConfig.resolve(taskId);
+    if (!resolved) {
       return {
-        ...base,
+        estimatedSeconds: 0,
+        backlogSeconds,
+        maxBacklogSeconds: this.maxBacklogSeconds,
         available: false,
         reason: 'no_preference',
         message: 'Esta tarea no tiene un equipo de medición asignado. Configúralo antes de medir.',
       };
     }
+
+    const estimatedSeconds = this.estimateSeconds(resolved.acquisition, ranges, selectedChannels.length, !!resolved.selector);
+    const base = {
+      estimatedSeconds,
+      backlogSeconds,
+      maxBacklogSeconds: this.maxBacklogSeconds,
+    };
 
     // Regla 1: cola llena
     if (backlogSeconds + estimatedSeconds > this.maxBacklogSeconds) {

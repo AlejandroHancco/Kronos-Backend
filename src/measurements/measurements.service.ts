@@ -211,20 +211,15 @@ export class MeasurementsService {
         );
       }
 
-      if (!params.ranges || params.ranges.length === 0) {
-        throw new HttpException(
-            'No frequency ranges specified',
-            HttpStatus.BAD_REQUEST,
-        );
-      }
-
       const uniqueChannels = Array.from(new Set(params.selectedChannels)).sort(
           (a, b) => a - b,
       );
 
       // 1. Experimento activo (sensor + selector opcional + rango de canales) — valida canales contra lo declarado
-      const { preference: taskPreference, sensor, selector, channelRange, valueMetas, acquisition } =
-          await this.experimentConfig.assertChannels(taskId, uniqueChannels);
+      const resolved = await this.experimentConfig.assertChannels(taskId, uniqueChannels);
+      const { preference: taskPreference, sensor, selector, channelRange, valueMetas, acquisition } = resolved;
+      // 1b. Rangos de barrido contra lo que declara el sensor (frecuencia, puntos, escala)
+      this.experimentConfig.assertRanges(resolved, params.ranges);
       const selectorDevice = taskPreference.channelSelectorDevice;
       const valueNames = valueMetas.map((v) => v.name);
       deviceNames = [sensor.context.name, selector?.context.name].filter((n): n is string => !!n);

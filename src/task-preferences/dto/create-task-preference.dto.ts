@@ -49,7 +49,7 @@ export class CreateTaskPreferenceDto {
   @IsUUID()
   channelSelectorDeviceId?: string | null;
 
-  /** Puede venir vacío (lecturas puntuales); la validación por sensor es de B3. */
+  /** Puede venir vacío (lecturas puntuales); se valida contra la adquisición declarada por el sensor. */
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => TaskPreferenceRangeDto)

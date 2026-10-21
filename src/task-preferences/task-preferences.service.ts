@@ -2,10 +2,15 @@ import { HttpException, HttpStatus, Injectable, NotFoundException } from '@nestj
 import { Device, Prisma, TaskPreference } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { TeamScopeService } from '../common/team-scope.service';
-import { ExperimentConfigService } from '../device-plugins/core/experiment-config.service';
+import { ExperimentConfigService, toSweepRanges } from '../device-plugins/core/experiment-config.service';
 import { invalidChannels } from '../device-plugins/core/experiment-config';
-import { CreateTaskPreferenceDto } from './dto/create-task-preference.dto';
+import { SweepRange } from '../device-plugins/core/acquisition';
+import { CreateTaskPreferenceDto, TaskPreferenceRangeDto } from './dto/create-task-preference.dto';
 import { UpdateTaskPreferenceDto } from './dto/update-task-preference.dto';
+
+/** Rangos del DTO (puntos/escala opcionales) con los mismos valores por defecto que aplica la BD. */
+const toValidationRanges = (ranges: TaskPreferenceRangeDto[]): SweepRange[] =>
+  ranges.map((r) => ({ start: r.start, stop: r.stop, points: r.points ?? 801, scale: r.scale ?? 'LIN' }));
 
 export interface TaskPreferenceResponse {
   id: number;
@@ -99,6 +104,7 @@ export class TaskPreferencesService {
       taskId,
       dto.sensorDeviceId,
       dto.channelSelectorDeviceId ?? null,
+      toValidationRanges(dto.ranges),
     );
 
     const preference = await this.prisma.taskPreference.create({
@@ -136,15 +142,19 @@ export class TaskPreferencesService {
   ): Promise<TaskPreferenceSaveResponse> {
     await this.teamScope.assertTaskInTeam(userId, taskId);
 
-    if (dto.sensorDeviceId !== undefined || dto.channelSelectorDeviceId !== undefined) {
-      const current = await this.prisma.taskPreference.findUnique({ where: { taskId } });
+    {
+      const current = await this.prisma.taskPreference.findUnique({
+        where: { taskId },
+        include: { ranges: { orderBy: { order: 'asc' } } },
+      });
       if (!current) {
         throw new NotFoundException('TaskPreference no encontrada');
       }
       const sensorDeviceId = dto.sensorDeviceId ?? current.sensorDeviceId;
       const channelSelectorDeviceId =
         dto.channelSelectorDeviceId !== undefined ? dto.channelSelectorDeviceId : current.channelSelectorDeviceId;
-      await this.experimentConfig.assertValidConfig(taskId, sensorDeviceId, channelSelectorDeviceId ?? null);
+      const ranges = dto.ranges ? toValidationRanges(dto.ranges) : toSweepRanges(current.ranges);
+      await this.experimentConfig.assertValidConfig(taskId, sensorDeviceId, channelSelectorDeviceId ?? null, ranges);
     }
 
     try {

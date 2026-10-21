@@ -5,6 +5,7 @@ import type { Queue } from 'bull';
 import { PrismaService } from '../prisma/prisma.service';
 import { MeasurementsService } from '../measurements/measurements.service';
 import type { SweepRange } from '../device-plugins/core/acquisition';
+import { ExperimentConfigService } from '../device-plugins/core/experiment-config.service';
 import { KronosGateway } from '../gateway/kronos.gateway';
 import { MEASUREMENTS_QUEUE } from '../queue/queue.constants';
 import {
@@ -34,6 +35,7 @@ export class SchedulerService {
     private prisma: PrismaService,
     private measurementsService: MeasurementsService,
     private schedulingService: MeasurementSchedulingService,
+    private experimentConfig: ExperimentConfigService,
     private kronosGateway: KronosGateway,
     @Optional()
     @InjectQueue(MEASUREMENTS_QUEUE)
@@ -133,16 +135,20 @@ export class SchedulerService {
       scale: r.scale,
     }));
 
+    // Duración desde la adquisición del dispositivo de medición; si el experimento ya no resuelve
+    // (tipo de dispositivo cambiado, etc.), se mantiene el fallback histórico de 60 s.
+    const resolved = await this.experimentConfig.resolve(job.taskId);
+    const estimatedSeconds = resolved
+      ? this.schedulingService.estimateSeconds(resolved.acquisition, ranges, job.channelNumbers.length, !!resolved.selector)
+      : 60;
+
     const payload: MeasurementJobData = {
       taskId: job.taskId,
       userId: job.createdBy,
       ranges,
       selectedChannels: job.channelNumbers,
       jobId: `scheduled-${job.id}`,
-      estimatedSeconds: this.schedulingService.estimateSeconds(
-        ranges,
-        job.channelNumbers.length,
-      ),
+      estimatedSeconds,
       scheduledJobId: job.id,
       executionIndex: job.executionIndex,
     };

@@ -13,6 +13,42 @@ const serviceWith = (sensorDevice: unknown, channelSelectorDevice: unknown) =>
     taskPreference: { findFirst: jest.fn(async () => ({ id: 1, name: 'cfg', sensorDevice, channelSelectorDevice, ranges: [] })) },
   } as any, registry);
 
+describe('ExperimentConfigService.assertValidConfig (rangos por sensor)', () => {
+  const hioki = device('s', 'hioki-im3570');
+  const serviceForValidConfig = (sensorDevice: unknown, channelSelectorDevice: unknown = null) =>
+    new ExperimentConfigService({
+      task: { findUnique: jest.fn(async () => ({ projectId: 'P' })) },
+      device: {
+        findUnique: jest.fn(async ({ where: { id } }: { where: { id: string } }) =>
+          id === (sensorDevice as any)?.id ? sensorDevice : channelSelectorDevice),
+      },
+    } as any, registry);
+
+  it('rechaza un rango fuera de la frecuencia del Hioki', async () => {
+    await expect(
+      serviceForValidConfig(hioki).assertValidConfig(7, 's', null, [{ start: 1, stop: 100, points: 10, scale: 'LIN' }]),
+    ).rejects.toThrow(new BadRequestException('Hioki IM3570 mide Frecuencia entre 4 Hz y 5 MHz'));
+  });
+
+  it('rechaza más puntos de los que admite el Hioki', async () => {
+    await expect(
+      serviceForValidConfig(hioki).assertValidConfig(7, 's', null, [{ start: 50000, stop: 500000, points: 900, scale: 'LIN' }]),
+    ).rejects.toThrow(new BadRequestException('Hioki IM3570 admite entre 1 y 801 puntos'));
+  });
+
+  it('rechaza una configuración sin rangos', async () => {
+    await expect(serviceForValidConfig(hioki).assertValidConfig(7, 's', null, [])).rejects.toThrow(
+      new BadRequestException('Indica al menos un rango de barrido'),
+    );
+  });
+
+  it('acepta un rango dentro de los límites del Hioki', async () => {
+    await expect(
+      serviceForValidConfig(hioki).assertValidConfig(7, 's', null, [{ start: 50000, stop: 500000, points: 801, scale: 'LOG' }]),
+    ).resolves.toBeUndefined();
+  });
+});
+
 describe('ExperimentConfigService.resolve', () => {
   it('sensor + selector: plugins, contextos con configuración efectiva y rango del selector', async () => {
     const r = (await serviceWith(device('s', 'sim-impedance', { rp: 40000 }), device('m', 'kronos-mux-16')).resolve(7))!;
