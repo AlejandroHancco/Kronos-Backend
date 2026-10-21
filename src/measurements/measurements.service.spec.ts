@@ -1,6 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import { MeasurementsService } from './measurements.service';
-import { SimulatedImpedancePlugin } from '../device-plugins/plugins/simulated-impedance.plugin';
+import { SimulatedImpedancePlugin } from '../device-plugins/plugins/sim-impedance/sim-impedance.plugin';
 
 function setup(resolved?: any) {
   const prisma = {

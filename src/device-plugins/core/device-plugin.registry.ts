@@ -1,12 +1,11 @@
-import { Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import {
   ChannelSelectionBinding,
   DeviceConnection,
   DeviceDriverPlugin,
   DeviceServiceDescription,
 } from './device-plugin.interface';
-import { HiokiIm3570Plugin } from './plugins/hioki-im3570.plugin';
-import { SimulatedImpedancePlugin } from './plugins/simulated-impedance.plugin';
+import { DEVICE_PLUGIN_INSTANCES } from './device-plugin.tokens';
 
 /**
  * Registro de plugins de dispositivo por `deviceType` (coincide con `device.type` en DB).
@@ -32,17 +31,11 @@ interface Registered {
 }
 
 @Injectable()
-export class DevicePluginRegistry implements OnModuleInit {
+export class DevicePluginRegistry {
   private readonly types = new Map<string, Registered>();
 
-  constructor(
-    private readonly hiokiPlugin: HiokiIm3570Plugin,
-    private readonly simPlugin: SimulatedImpedancePlugin,
-  ) {}
-
-  onModuleInit() {
-    this.register(this.hiokiPlugin);
-    this.register(this.simPlugin);
+  constructor(@Inject(DEVICE_PLUGIN_INSTANCES) plugins: DeviceDriverPlugin[]) {
+    plugins.forEach((p) => this.register(p));
   }
 
   /** Registra el tipo del plugin y, si declara selector de canal, el tipo del dispositivo que lo aloja (ej. 'mux'). */

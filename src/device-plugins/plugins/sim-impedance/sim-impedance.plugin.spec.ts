@@ -1,4 +1,4 @@
-import { SimulatedImpedancePlugin, randlesImpedance, sweepFrequencies, CONCRETE_LIKE } from './simulated-impedance.plugin';
+import { SimulatedImpedancePlugin, randlesImpedance, sweepFrequencies, CONCRETE_LIKE } from './sim-impedance.plugin';
 
 describe('randlesImpedance', () => {
   it('≈ Rs+Rp a baja frecuencia y ≈ Rs a muy alta frecuencia', () => {

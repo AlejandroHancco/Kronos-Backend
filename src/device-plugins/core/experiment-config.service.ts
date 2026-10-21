@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Device, TaskPreference, TaskPreferenceRange } from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaService } from '../../prisma/prisma.service';
 import { DevicePluginRegistry } from './device-plugin.registry';
 import { DeviceDriverPlugin, DeviceServiceDescription } from './device-plugin.interface';
 import {

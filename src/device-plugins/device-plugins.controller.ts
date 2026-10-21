@@ -1,5 +1,5 @@
 import { Controller, Get, UseGuards } from '@nestjs/common';
-import { DevicePluginRegistry } from './device-plugin.registry';
+import { DevicePluginRegistry } from './core/device-plugin.registry';
 import { CombinedAuthGuard } from '../auth/combined-auth.guard';
 import { PermissionGuard } from '../auth/guards/permission.guard';
 import { RequirePermission } from '../common/decorators/require-permission.decorator';

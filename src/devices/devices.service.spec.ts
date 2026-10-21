@@ -1,12 +1,11 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { DevicesService } from './devices.service';
-import { DevicePluginRegistry } from '../device-plugins/device-plugin.registry';
-import { HiokiIm3570Plugin } from '../device-plugins/plugins/hioki-im3570.plugin';
-import { SimulatedImpedancePlugin } from '../device-plugins/plugins/simulated-impedance.plugin';
+import { DevicePluginRegistry } from '../device-plugins/core/device-plugin.registry';
+import { HiokiIm3570Plugin } from '../device-plugins/plugins/hioki-im3570/hioki-im3570.plugin';
+import { SimulatedImpedancePlugin } from '../device-plugins/plugins/sim-impedance/sim-impedance.plugin';
 
 function setup() {
-  const registry = new DevicePluginRegistry(new HiokiIm3570Plugin(), new SimulatedImpedancePlugin());
-  registry.onModuleInit();
+  const registry = new DevicePluginRegistry([new HiokiIm3570Plugin(), new SimulatedImpedancePlugin()]);
   const prisma = {
     device: {
       create: jest.fn(async ({ data }) => data),

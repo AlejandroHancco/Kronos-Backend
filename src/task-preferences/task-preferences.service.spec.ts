@@ -1,8 +1,8 @@
 import { TaskPreferencesService } from './task-preferences.service';
-import { ExperimentConfigService } from '../device-plugins/experiment-config.service';
-import { DevicePluginRegistry } from '../device-plugins/device-plugin.registry';
-import { HiokiIm3570Plugin } from '../device-plugins/plugins/hioki-im3570.plugin';
-import { SimulatedImpedancePlugin } from '../device-plugins/plugins/simulated-impedance.plugin';
+import { ExperimentConfigService } from '../device-plugins/core/experiment-config.service';
+import { DevicePluginRegistry } from '../device-plugins/core/device-plugin.registry';
+import { HiokiIm3570Plugin } from '../device-plugins/plugins/hioki-im3570/hioki-im3570.plugin';
+import { SimulatedImpedancePlugin } from '../device-plugins/plugins/sim-impedance/sim-impedance.plugin';
 
 const device = (id: string, type: string) => ({ id, name: id, type, ip: null, projectId: 'P' });
 const savedPref = (analyzer: ReturnType<typeof device>, mux: ReturnType<typeof device> | null) => ({
@@ -11,8 +11,7 @@ const savedPref = (analyzer: ReturnType<typeof device>, mux: ReturnType<typeof d
 });
 
 function setup(pref: ReturnType<typeof savedPref>) {
-  const registry = new DevicePluginRegistry(new HiokiIm3570Plugin(), new SimulatedImpedancePlugin());
-  registry.onModuleInit();
+  const registry = new DevicePluginRegistry([new HiokiIm3570Plugin(), new SimulatedImpedancePlugin()]);
   const prisma = {
     taskPreference: {
       findUnique: jest.fn(async () => pref),

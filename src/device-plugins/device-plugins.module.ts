@@ -1,22 +1,33 @@
 import { Global, Module } from '@nestjs/common';
-import { DevicePluginRegistry } from './device-plugin.registry';
-import { HiokiIm3570Plugin } from './plugins/hioki-im3570.plugin';
-import { SimulatedImpedancePlugin } from './plugins/simulated-impedance.plugin';
+import { DevicePluginRegistry } from './core/device-plugin.registry';
+import { DeviceDriverPlugin } from './core/device-plugin.interface';
+import { DEVICE_PLUGIN_INSTANCES } from './core/device-plugin.tokens';
+import { DEVICE_PLUGINS } from './plugins';
 import { DevicePluginsController } from './device-plugins.controller';
 import { PrismaModule } from '../prisma/prisma.module';
-import { ExperimentConfigService } from './experiment-config.service';
+import { PermissionsModule } from '../permissions/permissions.module';
+import { ExperimentConfigService } from './core/experiment-config.service';
 
 /**
  * Módulo del Kronos Watcher dedicado a dispositivos: registra los plugins de cada
- * tipo de dispositivo soportado (ver device-plugin.interface.ts). Global para que
+ * tipo de dispositivo soportado (ver core/device-plugin.interface.ts). Global para que
  * DevicesModule (health check / test-connection) y MeasurementsModule (ejecución de
  * mediciones) resuelvan el mismo registry sin depender el uno del otro.
  */
 @Global()
 @Module({
-  imports: [PrismaModule],
+  imports: [PrismaModule, PermissionsModule],
   controllers: [DevicePluginsController],
-  providers: [HiokiIm3570Plugin, SimulatedImpedancePlugin, DevicePluginRegistry, ExperimentConfigService],
+  providers: [
+    ...DEVICE_PLUGINS,
+    {
+      provide: DEVICE_PLUGIN_INSTANCES,
+      useFactory: (...plugins: DeviceDriverPlugin[]) => plugins,
+      inject: DEVICE_PLUGINS,
+    },
+    DevicePluginRegistry,
+    ExperimentConfigService,
+  ],
   exports: [DevicePluginRegistry, ExperimentConfigService],
 })
 export class DevicePluginsModule {}

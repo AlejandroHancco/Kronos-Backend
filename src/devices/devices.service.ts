@@ -6,7 +6,7 @@ import { CreateDeviceDto } from './dto/create-device.dto';
 import { UpdateDeviceDto } from './dto/update-device.dto';
 import { UpdateDeviceStatusDto } from './dto/update-device-status.dto';
 import { TestConnectionDto } from './dto/test-connection.dto';
-import { DevicePluginRegistry, DeviceTypeCatalogEntry } from '../device-plugins/device-plugin.registry';
+import { DevicePluginRegistry, DeviceTypeCatalogEntry } from '../device-plugins/core/device-plugin.registry';
 
 @Injectable()
 export class DevicesService {

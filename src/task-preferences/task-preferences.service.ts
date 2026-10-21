@@ -2,8 +2,8 @@ import { HttpException, HttpStatus, Injectable, NotFoundException } from '@nestj
 import { Device, Prisma, TaskPreference } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { TeamScopeService } from '../common/team-scope.service';
-import { ExperimentConfigService } from '../device-plugins/experiment-config.service';
-import { invalidChannels } from '../device-plugins/experiment-config';
+import { ExperimentConfigService } from '../device-plugins/core/experiment-config.service';
+import { invalidChannels } from '../device-plugins/core/experiment-config';
 import { CreateTaskPreferenceDto } from './dto/create-task-preference.dto';
 import { UpdateTaskPreferenceDto } from './dto/update-task-preference.dto';
 

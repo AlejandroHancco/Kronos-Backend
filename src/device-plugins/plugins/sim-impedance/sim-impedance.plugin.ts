@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { DeviceDriverPlugin, DeviceServiceDescription, MeasureChannelParams, MeasuredPoint } from '../device-plugin.interface';
+import { DeviceDriverPlugin, DeviceServiceDescription, MeasureChannelParams, MeasuredPoint } from '../../core/device-plugin.interface';
 
 /** Circuito de Randles simplificado: Rs + (Rp ‖ C). Valores típicos de un concreto en fraguado. */
 export interface RandlesParams { rs: number; rp: number; c: number }

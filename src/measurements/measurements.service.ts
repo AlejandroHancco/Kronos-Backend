@@ -6,9 +6,9 @@ import { MeasurementsGateway } from './measurements.gateway';
 import { KronosGateway } from '../gateway/kronos.gateway';
 import { NotificationsService } from '../notifications/notifications.service';
 import { classifyMeasurement, MeasurementClassification } from './kronos-watcher';
-import { ExperimentConfigService } from '../device-plugins/experiment-config.service';
-import { channelSelectionError } from '../device-plugins/experiment-config';
-import type { MeasuredPoint } from '../device-plugins/device-plugin.interface';
+import { ExperimentConfigService } from '../device-plugins/core/experiment-config.service';
+import { channelSelectionError } from '../device-plugins/core/experiment-config';
+import type { MeasuredPoint } from '../device-plugins/core/device-plugin.interface';
 import { CreateMeasurementDto } from './dto/create-measurement.dto';
 import { buildMeasurementData, ChannelResult, parseSensorValues, postedMeasurementError, storedPointsOf } from './measurement-data';
 

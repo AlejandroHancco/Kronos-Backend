@@ -6,7 +6,7 @@ import { MeasurementsService, MeasurementRange } from '../measurements/measureme
 import { KronosGateway } from '../gateway/kronos.gateway';
 import { MEASUREMENTS_QUEUE } from '../queue/queue.constants';
 import { PrefDevices, sharesDevice } from './device-usage';
-import { ExperimentConfigService } from '../device-plugins/experiment-config.service';
+import { ExperimentConfigService } from '../device-plugins/core/experiment-config.service';
 
 /** Payload de los jobs de la cola 'measurements' */
 export interface MeasurementJobData {

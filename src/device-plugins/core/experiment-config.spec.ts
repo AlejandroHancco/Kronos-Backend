@@ -1,5 +1,5 @@
-import { HiokiIm3570Plugin } from './plugins/hioki-im3570.plugin';
-import { SimulatedImpedancePlugin } from './plugins/simulated-impedance.plugin';
+import { HiokiIm3570Plugin } from '../plugins/hioki-im3570/hioki-im3570.plugin';
+import { SimulatedImpedancePlugin } from '../plugins/sim-impedance/sim-impedance.plugin';
 import { channelRangeFor, channelSelectionError, experimentConfigError, invalidChannels, channelRangeMessage, valueMetasOf } from './experiment-config';
 
 const hioki = new HiokiIm3570Plugin().describe();

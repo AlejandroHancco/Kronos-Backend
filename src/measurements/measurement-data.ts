@@ -1,5 +1,5 @@
-import type { MeasuredPoint } from '../device-plugins/device-plugin.interface';
-import { CHANNEL_SLOTS, type MeasurementValueMeta } from '../device-plugins/experiment-config';
+import type { MeasuredPoint } from '../device-plugins/core/device-plugin.interface';
+import { CHANNEL_SLOTS, type MeasurementValueMeta } from '../device-plugins/core/experiment-config';
 export { CHANNEL_SLOTS, type MeasurementValueMeta };
 
 /** Formato de Measurement.data: por frecuencia, un arreglo de 16 slots por sensorValue declarado. */

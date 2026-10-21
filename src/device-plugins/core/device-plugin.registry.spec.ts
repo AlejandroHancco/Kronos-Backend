@@ -1,6 +1,6 @@
 import { DevicePluginRegistry } from './device-plugin.registry';
-import { HiokiIm3570Plugin } from './plugins/hioki-im3570.plugin';
-import { SimulatedImpedancePlugin } from './plugins/simulated-impedance.plugin';
+import { HiokiIm3570Plugin } from '../plugins/hioki-im3570/hioki-im3570.plugin';
+import { SimulatedImpedancePlugin } from '../plugins/sim-impedance/sim-impedance.plugin';
 import { DeviceDriverPlugin, DeviceServiceDescription } from './device-plugin.interface';
 
 const fake = (d: Partial<DeviceServiceDescription>): DeviceDriverPlugin => ({
@@ -13,11 +13,7 @@ const fake = (d: Partial<DeviceServiceDescription>): DeviceDriverPlugin => ({
 });
 
 describe('DevicePluginRegistry', () => {
-  const build = () => {
-    const r = new DevicePluginRegistry(new HiokiIm3570Plugin(), new SimulatedImpedancePlugin());
-    r.onModuleInit();
-    return r;
-  };
+  const build = () => new DevicePluginRegistry([new HiokiIm3570Plugin(), new SimulatedImpedancePlugin()]);
 
   it('registra el analyzer como sensor y su MUX como channel-selector', () => {
     const r = build();

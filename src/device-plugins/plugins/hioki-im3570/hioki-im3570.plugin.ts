@@ -6,7 +6,7 @@ import {
   DeviceServiceDescription,
   MeasureChannelParams,
   MeasuredPoint,
-} from '../device-plugin.interface';
+} from '../../core/device-plugin.interface';
 
 /**
  * Plugin del analyzer Hioki IM3570 (sensor, protocolo SCPI sobre TCP) + su MUX de

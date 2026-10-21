@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { TeamScopeService } from '../common/team-scope.service';
-import { ExperimentConfigService } from '../device-plugins/experiment-config.service';
+import { ExperimentConfigService } from '../device-plugins/core/experiment-config.service';
 import { CreateScheduledJobDto } from './dto/create-scheduled-job.dto';
 
 @Injectable()
