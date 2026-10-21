@@ -1,0 +1,26 @@
+{
+  "deviceType": "sim-temperature",
+  "fullName": "Sensor de temperatura y humedad simulado",
+  "shortName": "Temperatura (simulado)",
+  "manufacturer": "Kronos (simulación)",
+  "description": "SIMULADO: temperatura y humedad relativa del concreto con un ciclo diario y ruido; lectura puntual, no requiere hardware",
+  "simulated": true,
+  "connection": { "requiresIp": false },
+  "sensors": [
+    {
+      "sensorId": "sim-temperature-th",
+      "fullName": "Temperatura y humedad simuladas",
+      "description": "Temperatura (°C) y humedad relativa (%HR) en el momento de la lectura",
+      "protocol": "simulated",
+      "produces": "application/json",
+      "sensorValues": [
+        { "name": "temperature", "unit": "°C", "type": "double", "label": "Temperatura", "rangeMinimum": -10, "rangeMaximum": 60 },
+        { "name": "humidity", "unit": "%HR", "type": "double", "label": "Humedad relativa", "rangeMinimum": 0, "rangeMaximum": 100 }
+      ],
+      "accessMode": { "accessModeType": "pull" },
+      "acquisition": { "kind": "single", "secondsPerReading": 1 }
+    }
+  ],
+  "actuators": [],
+  "configuration": []
+}

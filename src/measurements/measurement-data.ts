@@ -64,10 +64,11 @@ const isFiniteNumber = (n: unknown): n is number => typeof n === 'number' && Num
 
 /**
  * Valida el contenido de POST /measurements: `sensorValues` no vacío ({name, unit, label?}),
- * y cada punto `{x, values}` con exactamente los valores declarados, cada uno un
- * arreglo de hasta 16 números finitos. Devuelve el primer error (en español) o null.
+ * y según la adquisición (`acquisition`), o un único punto `{ values }` sin x (lectura
+ * puntual) o puntos `{x, values}` con x finito (barrido), cada valor un arreglo de hasta
+ * 16 números finitos. Devuelve el primer error (en español) o null.
  */
-export function postedMeasurementError(sensorValues: unknown, data: unknown): string | null {
+export function postedMeasurementError(sensorValues: unknown, data: unknown, acquisition: AcquisitionSnapshot): string | null {
   if (!Array.isArray(sensorValues) || sensorValues.length === 0) {
     return 'sensorValues es obligatorio y debe declarar al menos un valor ({ name, unit, label? })';
   }
@@ -83,8 +84,13 @@ export function postedMeasurementError(sensorValues: unknown, data: unknown): st
   }
   if (!Array.isArray(data)) return 'data debe ser un arreglo de puntos { x, values }';
   if (data.length > MAX_POSTED_POINTS) return `data admite como máximo ${MAX_POSTED_POINTS} puntos (recibidos ${data.length})`;
+  if (acquisition.kind === 'single') {
+    if (data.length !== 1 || !isStoredPoint(data[0]) || data[0].x !== undefined) {
+      return 'Una lectura puntual tiene exactamente un punto { values } sin x';
+    }
+  }
   for (const [i, p] of data.entries()) {
-    if (!isStoredPoint(p) || !isFiniteNumber(p.x)) {
+    if (!isStoredPoint(p) || (acquisition.kind === 'sweep' && !isFiniteNumber(p.x))) {
       return `data[${i}] debe usar el formato { x: número, values: { … } }`;
     }
     for (const [name, arr] of Object.entries(p.values)) {

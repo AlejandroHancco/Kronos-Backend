@@ -70,38 +70,47 @@ describe('postedMeasurementError (POST /measurements)', () => {
   const sv = [{ name: 'g', unit: 'S' }, { name: 'b', unit: 'S', label: 'Susceptancia' }];
   const pt = (values: Record<string, unknown>, x: unknown = 1000) => ({ x, values });
   const ok = [pt({ g: [1, 2], b: [3, 4] })];
+  const sweep = { kind: 'sweep' as const, variable: { name: 'frequency', unit: 'Hz', label: 'Frecuencia' } };
+  const single = { kind: 'single' as const };
 
   it('acepta un payload válido', () => {
-    expect(postedMeasurementError(sv, ok)).toBeNull();
-    expect(postedMeasurementError(sv, [])).toBeNull();
+    expect(postedMeasurementError(sv, ok, sweep)).toBeNull();
+    expect(postedMeasurementError(sv, [], sweep)).toBeNull();
   });
   it('exige sensorValues no vacío y bien formado', () => {
-    expect(postedMeasurementError(undefined, ok)).toMatch(/sensorValues/);
-    expect(postedMeasurementError([], ok)).toMatch(/sensorValues/);
-    expect(postedMeasurementError([{ name: 'g' }], ok)).toMatch(/sensorValues\[0\]/);
-    expect(postedMeasurementError([{ name: '', unit: 'S' }], ok)).toMatch(/sensorValues\[0\]/);
-    expect(postedMeasurementError([{ name: 'g', unit: 'S', label: 5 }], ok)).toMatch(/sensorValues\[0\]/);
-    expect(postedMeasurementError([{ name: 'g', unit: 'S' }, { name: 'g', unit: 'S' }], ok)).toMatch(/repetido/);
+    expect(postedMeasurementError(undefined, ok, sweep)).toMatch(/sensorValues/);
+    expect(postedMeasurementError([], ok, sweep)).toMatch(/sensorValues/);
+    expect(postedMeasurementError([{ name: 'g' }], ok, sweep)).toMatch(/sensorValues\[0\]/);
+    expect(postedMeasurementError([{ name: '', unit: 'S' }], ok, sweep)).toMatch(/sensorValues\[0\]/);
+    expect(postedMeasurementError([{ name: 'g', unit: 'S', label: 5 }], ok, sweep)).toMatch(/sensorValues\[0\]/);
+    expect(postedMeasurementError([{ name: 'g', unit: 'S' }, { name: 'g', unit: 'S' }], ok, sweep)).toMatch(/repetido/);
   });
-  it('exige el formato { x, values } con x finito', () => {
-    expect(postedMeasurementError(sv, [{ frequency: 1, g: [1], b: [2] }])).toMatch(/data\[0\]/); // formato legado
-    expect(postedMeasurementError(sv, [pt({ g: [1], b: [1] }, 'x')])).toMatch(/data\[0\] debe usar el formato \{ x: número/);
-    expect(postedMeasurementError(sv, [pt({ g: [1], b: [1] }, Infinity)])).toMatch(/data\[0\]/);
-    expect(postedMeasurementError(sv, [{ values: { g: [1], b: [1] } }])).toMatch(/data\[0\]/);
-    expect(postedMeasurementError(sv, 'nope')).toMatch(/data/);
+  it('barrido: exige el formato { x, values } con x finito', () => {
+    expect(postedMeasurementError(sv, [{ frequency: 1, g: [1], b: [2] }], sweep)).toMatch(/data\[0\]/); // formato legado
+    expect(postedMeasurementError(sv, [pt({ g: [1], b: [1] }, 'x')], sweep)).toMatch(/data\[0\] debe usar el formato \{ x: número/);
+    expect(postedMeasurementError(sv, [pt({ g: [1], b: [1] }, Infinity)], sweep)).toMatch(/data\[0\]/);
+    expect(postedMeasurementError(sv, [{ values: { g: [1], b: [1] } }], sweep)).toMatch(/data\[0\]/);
+    expect(postedMeasurementError(sv, 'nope', sweep)).toMatch(/data/);
+  });
+  it('lectura puntual: exige exactamente un punto { values } sin x', () => {
+    const svT = [{ name: 't', unit: '°C' }];
+    expect(postedMeasurementError(svT, [{ values: { t: [1] } }], single)).toBeNull();
+    expect(postedMeasurementError(svT, [], single)).toMatch(/exactamente un punto \{ values \} sin x/);
+    expect(postedMeasurementError(svT, [{ values: { t: [1] } }, { values: { t: [2] } }], single)).toMatch(/exactamente un punto \{ values \} sin x/);
+    expect(postedMeasurementError(svT, [pt({ t: [1] })], single)).toMatch(/exactamente un punto \{ values \} sin x/);
   });
   it('rechaza valores no declarados y exige todos los declarados', () => {
-    expect(postedMeasurementError(sv, [pt({ g: [1], b: [1], z: [1] })])).toMatch(/"z" no está declarado/);
-    expect(postedMeasurementError(sv, [pt({ g: [1] })])).toMatch(/falta el valor "b"/);
+    expect(postedMeasurementError(sv, [pt({ g: [1], b: [1], z: [1] })], sweep)).toMatch(/"z" no está declarado/);
+    expect(postedMeasurementError(sv, [pt({ g: [1] })], sweep)).toMatch(/falta el valor "b"/);
   });
   it('cada valor es un arreglo de a lo más 16 números finitos', () => {
-    expect(postedMeasurementError(sv, [pt({ g: 1, b: [1] })])).toMatch(/hasta 16 números/);
-    expect(postedMeasurementError(sv, [pt({ g: Array(17).fill(0), b: [1] })])).toMatch(/hasta 16 números/);
-    expect(postedMeasurementError(sv, [pt({ g: [1, NaN], b: [1] })])).toMatch(/hasta 16 números/);
-    expect(postedMeasurementError(sv, [pt({ g: ['1'], b: [1] })])).toMatch(/hasta 16 números/);
+    expect(postedMeasurementError(sv, [pt({ g: 1, b: [1] })], sweep)).toMatch(/hasta 16 números/);
+    expect(postedMeasurementError(sv, [pt({ g: Array(17).fill(0), b: [1] })], sweep)).toMatch(/hasta 16 números/);
+    expect(postedMeasurementError(sv, [pt({ g: [1, NaN], b: [1] })], sweep)).toMatch(/hasta 16 números/);
+    expect(postedMeasurementError(sv, [pt({ g: ['1'], b: [1] })], sweep)).toMatch(/hasta 16 números/);
   });
   it('limita la cantidad de puntos', () => {
     const many = Array.from({ length: MAX_POSTED_POINTS + 1 }, (_, i) => pt({ g: [1], b: [1] }, i));
-    expect(postedMeasurementError(sv, many)).toMatch(/como máximo 10000 puntos/);
+    expect(postedMeasurementError(sv, many, sweep)).toMatch(/como máximo 10000 puntos/);
   });
 });

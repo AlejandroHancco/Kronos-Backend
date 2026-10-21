@@ -20,4 +20,8 @@ describe('classifyMeasurement', () => {
     expect(classifyMeasurement([], [1], ['z'])).toMatchObject({ severity: 'error', bare: true });
     expect(classifyMeasurement([pt(1, { z: slots(1) })], [1], [])).toMatchObject({ severity: 'error', bare: true });
   });
+  it('clasifica también una lectura puntual (un único punto sin x)', () => {
+    expect(classifyMeasurement([{ values: { temperature: slots(23) } }], [1], ['temperature'])).toEqual({ severity: 'correct' });
+    expect(classifyMeasurement([{ values: { temperature: [0, ...Array(15).fill(0)] } }], [1], ['temperature']).severity).toBe('error');
+  });
 });

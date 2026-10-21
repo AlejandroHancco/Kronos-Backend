@@ -27,7 +27,9 @@ const WARNING_ZERO_RATIO = 0.3;
  * dispositivo: la adquisición se resuelve por plugin (ver device-plugins/) y aquí
  * solo se inspeccionan las claves de `point.values` declaradas.
  * Solo revisa los canales efectivamente medidos — los demás slots del array de
- * 16 quedan en 0 por diseño y no son una anomalía.
+ * 16 quedan en 0 por diseño y no son una anomalía. Agnóstico también a la forma
+ * de la adquisición: recorre los puntos sin leer `x`, así que sirve igual para
+ * puntos de barrido o una lectura puntual.
  */
 export function classifyMeasurement(
   measurementData: StoredMeasurementPoint[],

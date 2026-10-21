@@ -144,6 +144,33 @@ describe('MeasurementsService.measureTask (sensor + selector de canal)', () => {
     expect(prisma.measurement.create).not.toHaveBeenCalled();
   });
 
+  it('adquisición "single": una lectura por canal sin rangos, sin columnas de barrido', async () => {
+    const sensorCtx2 = { id: 's1', name: 'Temp', ip: null, configuration: {} };
+    const sensorPlugin = {
+      getSensorData: jest.fn(async () => [{ values: { temperature: 23, humidity: 50 } }]),
+    };
+    const resolved = {
+      preference: {
+        name: 'cfg', sensorDevice: { name: 'Temp', type: 'sim-temperature', ip: null },
+        channelSelectorDevice: null,
+      },
+      sensor: { plugin: sensorPlugin, description: {}, context: sensorCtx2 },
+      selector: null,
+      channelRange: { min: 1, max: 1 },
+      valueMetas: [{ name: 'temperature', unit: '°C' }, { name: 'humidity', unit: '%HR' }],
+      acquisition: { kind: 'single', secondsPerReading: 1 },
+    };
+    const { service, prisma } = setup(resolved);
+    const out = await service.measureTask(1, 'u1', { ranges: [], selectedChannels: [1] });
+    expect(sensorPlugin.getSensorData).toHaveBeenCalledTimes(1);
+    expect(sensorPlugin.getSensorData).toHaveBeenCalledWith(sensorCtx2, { kind: 'single' });
+    const data = prisma.measurement.create.mock.calls[0][0].data;
+    expect(data).toMatchObject({ start: null, stop: null, points: null, scale: null, acquisition: { kind: 'single' } });
+    expect(data.data).toHaveLength(1);
+    expect('x' in data.data[0]).toBe(false);
+    expect(out.acquisition).toEqual({ kind: 'single' });
+  });
+
   it('libera los dispositivos aunque getSensorData o el guardado fallen', async () => {
     const { resolved, sensorPlugin } = resolvedWith([], false);
     sensorPlugin.getSensorData.mockRejectedValue(new Error('timeout'));

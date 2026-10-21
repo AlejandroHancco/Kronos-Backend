@@ -92,17 +92,18 @@ export class MeasurementsService {
 
   async create(createMeasurementDto: CreateMeasurementDto, userId: string) {
     await this.teamScope.assertTaskInTeam(userId, createMeasurementDto.taskId);
-    const { data, sensorValues, ...rest } = createMeasurementDto;
-    const payloadError = postedMeasurementError(sensorValues, data);
+    const { data, sensorValues, acquisition, ...rest } = createMeasurementDto;
+    const snapshot = parseAcquisitionSnapshot(acquisition);
+    const payloadError = postedMeasurementError(sensorValues, data, snapshot);
     if (payloadError) throw new BadRequestException(payloadError);
     return this.prisma.measurement.create({
       data: {
         ...rest,
+        sensorDeviceIp: rest.sensorDeviceIp || null,
         sensorValues: parseSensorValues(sensorValues) as unknown as Prisma.InputJsonValue,
-        // Hasta B4, POST /measurements solo admite barridos en frecuencia ({ x, values })
-        acquisition: parseAcquisitionSnapshot(undefined) as unknown as Prisma.InputJsonValue,
+        acquisition: snapshot as unknown as Prisma.InputJsonValue,
         // Solo { x, values } por punto (claves extra descartadas)
-        data: storedPointsOf(data).map(({ x, values }) => ({ x, values })) as unknown as Prisma.InputJsonValue,
+        data: storedPointsOf(data).map(({ x, values }) => (x === undefined ? { values } : { x, values })) as unknown as Prisma.InputJsonValue,
       },
     });
   }
