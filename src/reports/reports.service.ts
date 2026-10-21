@@ -4,7 +4,9 @@ import type { Response } from 'express';
 import { PrismaService } from '../prisma/prisma.service';
 import { TeamScopeService } from '../common/team-scope.service';
 import { parseAcquisitionSnapshot, parseSensorValues, storedPointsOf } from '../measurements/measurement-data';
-import { buildCsv, csvPreamble, rowsToCsvLines, valueColumnsFor, CsvChannel, CsvMeasurement } from './measurement-csv';
+import {
+  buildCsv, csvPreamble, rowsToCsvLines, valueColumnsFor, csvHeader, xColumnOf, blockKeyOf, CsvChannel, CsvMeasurement,
+} from './measurement-csv';
 import {
   fetchKeysetPage, PageCursor, PageIdRow, pageIdsQuery, streamMeasurementsCsv, valueColumnsQuery, writeChunk,
 } from './csv-stream';
@@ -216,6 +218,7 @@ export class ReportsService {
       orderBy: takenAtOrder,
       select: {
         id: true, takenAt: true, takenByName: true, presetName: true, watcherStatus: true, data: true, sensorValues: true,
+        acquisition: true,
         measurementChannels: { select: channelSelect },
       },
     });
@@ -274,7 +277,7 @@ export class ReportsService {
     res.write(csvPreamble([
       `Kronos | Proyecto: ${task.project.name} | Tarea: ${task.name}`,
       `Generado: ${new Date().toISOString()} | Rango: ${rangeText}`,
-    ], cols));
+    ]));
 
     // El cliente puede cortar la descarga a mitad de camino; `close` es la única señal fiable
     // (además de `res.destroyed`/`writableEnded`, que ya refleja algunos cierres) para dejar de
@@ -295,6 +298,7 @@ export class ReportsService {
             where: { id: { in: ids } },
             select: {
               id: true, takenAt: true, takenByName: true, presetName: true, watcherStatus: true, data: true, sensorValues: true,
+              acquisition: true,
               measurementChannels: { select: channelSelect },
             },
           }),
@@ -302,9 +306,20 @@ export class ReportsService {
         CSV_BATCH_SIZE,
       );
 
+    // Un bloque (con su propio encabezado) por cada tramo consecutivo de mediciones con la misma
+    // adquisición, igual que `buildCsv`; aquí el estado vive en `prevBlockKey` porque `toLines` se
+    // llama una medición a la vez a medida que avanza el streaming.
+    let prevBlockKey: string | null = null;
     const toLines = ({ measurementChannels, takenAtKey: _key, ...m }: Awaited<ReturnType<typeof fetchPage>>[number]): string[] => {
       const measurement: CsvMeasurement = { ...m, channels: measurementChannels.map(toCsvChannel) };
-      return rowsToCsvLines(measurement, cols);
+      const a = parseAcquisitionSnapshot(measurement.acquisition);
+      const key = blockKeyOf(a);
+      const rows = rowsToCsvLines(measurement, cols);
+      if (key !== prevBlockKey) {
+        prevBlockKey = key;
+        return [csvHeader(cols, xColumnOf(a)).join(','), ...rows];
+      }
+      return rows;
     };
 
     try {
