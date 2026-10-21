@@ -4,6 +4,7 @@ import type { Response } from 'express';
 import { PrismaService } from '../prisma/prisma.service';
 import { TeamScopeService } from '../common/team-scope.service';
 import { parseAcquisitionSnapshot, parseSensorValues, storedPointsOf } from '../measurements/measurement-data';
+import { loadSingleReadings, singleReadingFields } from '../measurements/single-readings';
 import {
   buildCsv, csvPreamble, rowsToCsvLines, valueColumnsFor, csvHeader, xColumnOf, blockKeyOf, CsvChannel, CsvMeasurement,
 } from './measurement-csv';
@@ -140,16 +141,19 @@ export class ReportsService {
     });
     if (!task) throw new NotFoundException('Task not found');
 
-    const measurements = await this.prisma.measurement.findMany({
+    // Sin `data` en la lista (un barrido puede tener miles de puntos); las lecturas puntuales traen
+    // su punto y sus sensorValues en una segunda consulta acotada a ellas (sin N+1 en el frontend).
+    const rows = await this.prisma.measurement.findMany({
       where: { taskId, ...this.takenAtWhere(range) },
       orderBy: takenAtOrder,
       select: {
         id: true, takenAt: true, takenByName: true, presetName: true, scale: true, acquisition: true,
         watcherStatus: true, watcherReason: true,
-        data: true,
         measurementChannels: { select: channelSelect },
       },
     });
+    const measurements = rows.map((m) => ({ ...m, acquisition: parseAcquisitionSnapshot(m.acquisition) }));
+    const singles = await loadSingleReadings(this.prisma, measurements);
 
     // La más reciente con datos reales: una medición fallida puede tener `data = []`, en cuyo
     // caso no debe ocultar el gráfico de una medición anterior válida. Se revisan hasta
@@ -193,18 +197,13 @@ export class ReportsService {
             })),
           }
         : null,
-      // `data` solo para lecturas puntuales (un punto, chico): evita el N+1 que hoy obliga al
-      // frontend a pedir el detalle de cada medición para armar la serie de tiempo. Los barridos
-      // mantienen la forma actual del reporte (sin `data` completo en la lista).
-      measurements: measurements.map(({ measurementChannels, acquisition, data, ...m }) => {
-        const snapshot = parseAcquisitionSnapshot(acquisition);
-        return {
-          ...m,
-          acquisition: snapshot,
-          channels: measurementChannels.map(toCsvChannel),
-          ...(snapshot.kind === 'single' ? { data: storedPointsOf(data) } : {}),
-        };
-      }),
+      // `data` y `sensorValues` solo en lecturas puntuales (un punto, chico): el frontend arma la
+      // serie de tiempo sin pedir el detalle de cada medición. Los barridos no llevan `data`.
+      measurements: measurements.map(({ measurementChannels, ...m }) => ({
+        ...m,
+        channels: measurementChannels.map(toCsvChannel),
+        ...singleReadingFields(singles, m.id, m.acquisition),
+      })),
       latest: latest
         ? {
             id: latest.id,

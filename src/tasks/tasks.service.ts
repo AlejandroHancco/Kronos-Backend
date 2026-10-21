@@ -6,7 +6,8 @@ import { ExperimentConfigService } from '../device-plugins/core/experiment-confi
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { MeasureDto } from './dto/measure.dto';
-import { channelNumbersOf, parseAcquisitionSnapshot, storedPointsOf } from '../measurements/measurement-data';
+import { channelNumbersOf, parseAcquisitionSnapshot } from '../measurements/measurement-data';
+import { loadSingleReadings, singleReadingFields } from '../measurements/single-readings';
 
 @Injectable()
 export class TasksService {
@@ -105,10 +106,10 @@ export class TasksService {
 
   async getMeasurements(taskId: number, userId: string) {
     await this.teamScope.assertTaskInTeam(userId, taskId);
-    // measurementChannels y data se cargan en la misma consulta (sin N+1): data solo se expone
-    // en la respuesta para lecturas puntuales (un punto, chico); los barridos mantienen la forma
-    // actual de la lista (sin data completo) para no inflar el payload.
-    const measurements = await this.prisma.measurement.findMany({
+    // La lista no carga `data` (un barrido puede tener miles de puntos): measurementChannels viene en
+    // la misma consulta (sin N+1) y el punto de las lecturas puntuales, junto con sus sensorValues,
+    // llega en una segunda consulta acotada a esas mediciones.
+    const rows = await this.prisma.measurement.findMany({
       where: { taskId },
       orderBy: { takenAt: 'desc' },
       select: {
@@ -117,25 +118,23 @@ export class TasksService {
         takenBy: true,
         start: true,
         stop: true,
+        scale: true,
         sensorDeviceName: true,
         channelSelectorName: true,
         acquisition: true,
-        data: true,
         measurementChannels: { select: { channelNumber: true } },
       },
     });
+    const measurements = rows.map((m) => ({ ...m, acquisition: parseAcquisitionSnapshot(m.acquisition) }));
+    const singles = await loadSingleReadings(this.prisma, measurements);
 
-    return measurements.map(({ measurementChannels, data, ...m }) => {
-      const acquisition = parseAcquisitionSnapshot(m.acquisition);
-      return {
-        ...m,
-        start: m.start === null ? null : Number(m.start),
-        stop: m.stop === null ? null : Number(m.stop),
-        acquisition,
-        channels: channelNumbersOf(measurementChannels),
-        ...(acquisition.kind === 'single' ? { data: storedPointsOf(data) } : {}),
-      };
-    });
+    return measurements.map(({ measurementChannels, ...m }) => ({
+      ...m,
+      start: m.start === null ? null : Number(m.start),
+      stop: m.stop === null ? null : Number(m.stop),
+      channels: channelNumbersOf(measurementChannels),
+      ...singleReadingFields(singles, m.id, m.acquisition),
+    }));
   }
 
   async measure(taskId: number, dto: MeasureDto, userId: string) {
