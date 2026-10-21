@@ -17,7 +17,14 @@
         { "name": "g", "unit": "S", "type": "double", "label": "Conductancia" },
         { "name": "b", "unit": "S", "type": "double", "label": "Susceptancia" }
       ],
-      "accessMode": { "accessModeType": "pull" }
+      "accessMode": { "accessModeType": "pull" },
+      "acquisition": {
+        "kind": "sweep",
+        "variable": { "name": "frequency", "unit": "Hz", "label": "Frecuencia", "rangeMinimum": 4, "rangeMaximum": 5000000 },
+        "points": { "minimum": 1, "maximum": 801 },
+        "scales": ["LIN", "LOG"],
+        "secondsPerPoint": 0.01
+      }
     }
   ],
   "actuators": [],

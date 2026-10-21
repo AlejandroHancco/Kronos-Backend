@@ -9,6 +9,7 @@ const build = () => new DevicePluginRegistry([new HiokiIm3570Plugin(), new Krono
 const sensorMeta = {
   sensorId: 's', fullName: 'S', description: '', protocol: 'simulated' as const, produces: 'application/json',
   sensorValues: [{ name: 'z', unit: 'Ω', type: 'double' as const }], accessMode: { accessModeType: 'pull' as const },
+  acquisition: { kind: 'single' as const, secondsPerReading: 1 },
 };
 const actuatorMeta = {
   actuatorId: 'a', fullName: 'A', description: '', protocol: 'http' as const, inputType: 'integer' as const,

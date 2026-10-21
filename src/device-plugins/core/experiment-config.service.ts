@@ -4,6 +4,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { DevicePluginRegistry } from './device-plugin.registry';
 import type { ActuatorPlugin, DeviceContext, DeviceServiceDescription, SensorPlugin } from './device-plugin.interface';
 import { toDeviceContext } from './configuration';
+import { AcquisitionMetadata, acquisitionOf } from './acquisition';
 import {
   ChannelRange,
   MeasurementValueMeta,
@@ -29,6 +30,7 @@ export interface ResolvedExperiment {
   channelRange: ChannelRange;
   valueMetas: MeasurementValueMeta[];
   experiment: ExperimentDefinition;
+  acquisition: AcquisitionMetadata;
 }
 
 const mismatch = (d: { name: string; type: string | null }, what: string) =>
@@ -94,6 +96,7 @@ export class ExperimentConfigService {
       channelRange: channelRangeFor(selector?.description ?? null),
       valueMetas: valueMetasOf(sensorDescription),
       experiment: experimentFor(this.registry.catalog(), s.type, m?.type ?? null)!,
+      acquisition: acquisitionOf(sensorDescription)!,
     };
   }
 
@@ -113,9 +116,9 @@ export class ExperimentConfigService {
     const found = experimentFor(this.registry.catalog(), pref.analyzerDevice.type, m?.type ?? null);
     const experiment = found ? { experimentId: found.experimentId, fullName: found.fullName } : null;
     if (this.registry.role(pref.analyzerDevice.type) !== 'sensor') {
-      return { channelRange, sensorValues: [], simulated: false, experiment };
+      return { channelRange, sensorValues: [], simulated: false, experiment, acquisition: null };
     }
     const d = this.registry.describe(pref.analyzerDevice.type!);
-    return { channelRange, sensorValues: valueMetasOf(d), simulated: d.simulated, experiment };
+    return { channelRange, sensorValues: valueMetasOf(d), simulated: d.simulated, experiment, acquisition: acquisitionOf(d) };
   }
 }

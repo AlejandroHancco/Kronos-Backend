@@ -10,6 +10,7 @@ import {
   isActuatorPlugin,
   isSensorPlugin,
 } from './device-plugin.interface';
+import { AcquisitionMetadata, acquisitionOf } from './acquisition';
 import { DEVICE_PLUGIN_INSTANCES } from './device-plugin.tokens';
 import { ChannelRange, channelRangeOf } from './experiment-config';
 
@@ -28,6 +29,8 @@ export interface DeviceTypeCatalogEntry {
   /** Solo para 'channel-selector': rango declarado por su actuator. */
   channelRange: ChannelRange | null;
   configuration: ConfigurationParameterMetadata[];
+  /** Solo para 'sensor': adquisición declarada por su primer sensor. */
+  acquisition: AcquisitionMetadata | null;
   service: DeviceServiceDescription;
 }
 
@@ -138,6 +141,7 @@ export class DevicePluginRegistry {
         connection: d.connection,
         channelRange: role === 'channel-selector' ? channelRangeOf(d) : null,
         configuration: d.configuration,
+        acquisition: acquisitionOf(d),
         service: d,
       };
     });

@@ -1,4 +1,5 @@
 import type { DeviceTypeCatalogEntry } from './device-plugin.registry';
+import type { AcquisitionMetadata } from './acquisition';
 import { ChannelRange, MeasurementValueMeta, channelRangeFor, valueMetasOf } from './experiment-config';
 
 /**
@@ -15,6 +16,7 @@ export interface ExperimentDefinition {
   channelRange: ChannelRange;
   sensorValues: MeasurementValueMeta[];
   simulated: boolean;
+  acquisition: AcquisitionMetadata;
 }
 
 export const experimentIdOf = (sensorType: string, selectorType: string | null): string =>
@@ -33,6 +35,7 @@ function definition(sensor: DeviceTypeCatalogEntry, selector: DeviceTypeCatalogE
     channelRange,
     sensorValues: valueMetasOf(sensor.service),
     simulated: sensor.simulated,
+    acquisition: sensor.acquisition!,
   };
 }
 

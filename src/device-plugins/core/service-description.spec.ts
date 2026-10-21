@@ -4,7 +4,8 @@ const valid = () => ({
   deviceType: 'demo-sensor', fullName: 'Demo', shortName: 'Demo', manufacturer: 'K', description: 'd',
   simulated: true, connection: { requiresIp: false },
   sensors: [{ sensorId: 's', fullName: 'S', description: '', protocol: 'simulated', produces: 'application/json',
-    sensorValues: [{ name: 'z', unit: 'Ω', type: 'double' }], accessMode: { accessModeType: 'pull' } }],
+    sensorValues: [{ name: 'z', unit: 'Ω', type: 'double' }], accessMode: { accessModeType: 'pull' },
+    acquisition: { kind: 'single', secondsPerReading: 1 } }],
   actuators: [],
   configuration: [{ name: 'rs', label: 'Rs', type: 'double', unit: 'Ω', rangeMinimum: 0, rangeMaximum: 10, default: 1, access: 'read-write', storage: 'persisted' }],
 });
@@ -23,6 +24,16 @@ describe('parseServiceDescription', () => {
     [(d: any) => { d.sensors[0].sensorValues.push({ name: 'z', unit: 'Ω', type: 'double' }); }, /repetido "z"/],
     [(d: any) => { d.sensors[0].sensorValues[0].name = 'Z-1'; }, /sensorValues/],
     [(d: any) => { d.channelSelector = { actuatorId: 'nope', valueName: 'channel' }; }, /channelSelector/],
+    [(d: any) => { delete d.sensors[0].acquisition; }, /acquisition/],
+    [(d: any) => {
+      d.sensors.push({
+        ...d.sensors[0], sensorId: 's2', sensorValues: [{ name: 'w', unit: 'V', type: 'double' }],
+        acquisition: {
+          kind: 'sweep', variable: { name: 'v', unit: 'V', label: 'V', rangeMinimum: 0, rangeMaximum: 1 },
+          points: { minimum: 1, maximum: 2 }, scales: ['LIN'], secondsPerPoint: 1,
+        },
+      });
+    }, /mismo tipo de adquisición/],
     [(d: any) => { d.configuration[0].default = 99; }, /rs/],
     [(d: any) => { delete d.configuration[0].default; }, /default/],
     [(d: any) => { d.configuration[0].storage = 'fixed'; }, /solo lectura|read-only/],

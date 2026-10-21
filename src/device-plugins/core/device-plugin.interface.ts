@@ -21,10 +21,13 @@
  *     (ChannelSelectorMetadata) y `configuration` en DeviceServiceDescription;
  *   - `fullName` a nivel superior de DeviceServiceDescription;
  *   - `label` en SensorValueMetadata (texto en español para leyendas);
+ *   - `acquisition` en SensorMetadata (sweep | single);
  *   - `lastMeasured` es una aproximación: GET /devices/:id/describe lo deriva de la última
  *     medición de tareas cuya configuración actual usa el equipo.
  * Modos de acceso: solo se implementa `pull`; `push` y `stream` se declaran pero no se usan.
  */
+
+import type { AcquisitionMetadata } from './acquisition';
 
 export type AccessModeType = 'pull' | 'push' | 'stream';
 export type ValueType = 'double' | 'integer' | 'string' | 'boolean';
@@ -59,6 +62,8 @@ export interface SensorMetadata {
   produces: string;
   sensorValues: SensorValueMetadata[];
   accessMode: AccessMode;
+  /** Extensión Kronos: cómo adquiere (barrido sobre una variable declarada o lectura puntual). */
+  acquisition: AcquisitionMetadata;
 }
 
 /** Parte de la Tabla 19: valores de entrada que acepta el actuator. */

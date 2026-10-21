@@ -29,4 +29,11 @@ describe('experimentos derivados', () => {
     expect(experimentFor(entries, 'analyzer', null)).toBeNull();
     expect(experimentIdOf('hioki-im3570', null)).toBe('hioki-im3570');
   });
+
+  it('cada definición declara la misma adquisición que su sensor', () => {
+    const sensorAcquisitions = new Map(entries.filter((e) => e.role === 'sensor').map((e) => [e.deviceType, e.acquisition!.kind]));
+    for (const def of experimentCatalog(entries)) {
+      expect(def.acquisition.kind).toBe(sensorAcquisitions.get(def.sensorType));
+    }
+  });
 });

@@ -20,6 +20,21 @@ describe('HiokiIm3570Plugin', () => {
     ]);
   });
 
+  it('los valores por defecto de la configuración caen dentro de lo declarado en acquisition', () => {
+    const acquisition = d.sensors[0].acquisition;
+    if (acquisition.kind !== 'sweep') throw new Error('se esperaba un sensor sweep');
+    const byName = Object.fromEntries(d.configuration.map((p) => [p.name, p]));
+    expect(byName.defaultStartFreq.rangeMinimum).toBeGreaterThanOrEqual(acquisition.variable.rangeMinimum);
+    expect(byName.defaultStartFreq.rangeMaximum).toBeLessThanOrEqual(acquisition.variable.rangeMaximum);
+    expect(byName.defaultStopFreq.rangeMinimum).toBeGreaterThanOrEqual(acquisition.variable.rangeMinimum);
+    expect(byName.defaultStopFreq.rangeMaximum).toBeLessThanOrEqual(acquisition.variable.rangeMaximum);
+    expect(byName.defaultPoints.rangeMinimum).toBeGreaterThanOrEqual(acquisition.points.minimum);
+    expect(byName.defaultPoints.rangeMaximum).toBeLessThanOrEqual(acquisition.points.maximum);
+    for (const value of byName.defaultSweepType.allowedValues!) {
+      expect(acquisition.scales).toContain(value);
+    }
+  });
+
   it('validateConfiguration exige frecuencia inicial < final', () => {
     const cfg = effectiveConfiguration(d.configuration, {});
     expect(plugin.validateConfiguration(cfg)).toBeNull();

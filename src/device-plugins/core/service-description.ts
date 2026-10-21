@@ -1,4 +1,5 @@
 import { parameterValueError } from './configuration';
+import { parseAcquisition } from './acquisition';
 import type {
   AccessMode,
   AccessModeType,
@@ -104,6 +105,7 @@ function sensor(path: string, v: unknown, usedValueNames: Set<string>): SensorMe
     produces: str(`${path}.produces`, o.produces),
     sensorValues,
     accessMode: accessMode(`${path}.accessMode`, o.accessMode),
+    acquisition: parseAcquisition(`${path}.acquisition`, o.acquisition),
   };
 }
 
@@ -217,6 +219,8 @@ function parseDescription(raw: unknown): DeviceServiceDescription {
 
   const usedValueNames = new Set<string>();
   const sensors = arr('sensors', o.sensors).map((s, i) => sensor(`sensors[${i}]`, s, usedValueNames));
+  const kinds = new Set(sensors.map((s) => s.acquisition.kind));
+  if (kinds.size > 1) fail('sensors', 'todos los sensores de un dispositivo deben declarar el mismo tipo de adquisición');
   const actuators = arr('actuators', o.actuators).map((a, i) => actuator(`actuators[${i}]`, a));
   const configuration = arr('configuration', o.configuration ?? []).map((c, i) => configurationParameter(`configuration[${i}]`, c));
 

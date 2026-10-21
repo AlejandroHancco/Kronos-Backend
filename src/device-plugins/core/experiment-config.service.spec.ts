@@ -48,7 +48,7 @@ describe('ExperimentConfigService.summarize', () => {
       .toMatchObject({ channelRange: { min: 1, max: 16 }, simulated: false });
     expect(s.summarize({ analyzerDevice: { type: 'hioki-im3570' }, muxDevice: { type: 'mux' } }).channelRange).toEqual({ min: 1, max: 1 });
     expect(s.summarize({ analyzerDevice: { type: 'analyzer' }, muxDevice: null })).toEqual({
-      channelRange: { min: 1, max: 1 }, sensorValues: [], simulated: false, experiment: null,
+      channelRange: { min: 1, max: 1 }, sensorValues: [], simulated: false, experiment: null, acquisition: null,
     });
   });
 
