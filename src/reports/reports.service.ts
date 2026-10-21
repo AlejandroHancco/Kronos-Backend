@@ -185,8 +185,8 @@ export class ReportsService {
       preference: pref
         ? {
             name: pref.name,
-            analyzer: pref.sensorDevice,
-            mux: pref.channelSelectorDevice,
+            sensorDevice: pref.sensorDevice,
+            channelSelector: pref.channelSelectorDevice,
             ranges: pref.ranges.map((r) => ({
               start: Number(r.start), stop: Number(r.stop), points: r.points, scale: r.scale,
             })),
