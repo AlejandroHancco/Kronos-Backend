@@ -57,6 +57,11 @@ export function storedPointsOf(json: unknown): StoredMeasurementPoint[] {
   return Array.isArray(json) ? json.filter(isStoredPoint) : [];
 }
 
+/** Lista plana de canales medidos (número de canal, ascendente) a partir de las filas de `measurementChannels`. */
+export function channelNumbersOf(channels: { channelNumber: number }[]): number[] {
+  return channels.map((c) => c.channelNumber).sort((a, b) => a - b);
+}
+
 /** Tope de puntos aceptados en POST /measurements. */
 export const MAX_POSTED_POINTS = 10_000;
 

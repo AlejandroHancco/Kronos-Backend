@@ -1,6 +1,16 @@
 import {
-  buildMeasurementData, MAX_POSTED_POINTS, parseAcquisitionSnapshot, parseSensorValues, postedMeasurementError, storedPointsOf,
+  buildMeasurementData, channelNumbersOf, MAX_POSTED_POINTS, parseAcquisitionSnapshot, parseSensorValues, postedMeasurementError,
+  storedPointsOf,
 } from './measurement-data';
+
+describe('channelNumbersOf', () => {
+  it('devuelve los números de canal medidos, ordenados ascendentemente', () => {
+    expect(channelNumbersOf([{ channelNumber: 5 }, { channelNumber: 1 }, { channelNumber: 3 }])).toEqual([1, 3, 5]);
+  });
+  it('arreglo vacío → []', () => {
+    expect(channelNumbersOf([])).toEqual([]);
+  });
+});
 
 describe('buildMeasurementData', () => {
   it('fusiona canales por x en 16 slots por valor declarado', () => {

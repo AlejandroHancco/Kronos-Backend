@@ -121,6 +121,7 @@ export class MeasurementsGateway
     data: StoredMeasurementPoint[],
     sensorValues: MeasurementValueMeta[],
     acquisition: AcquisitionSnapshot,
+    channels: number[],
   ) {
     this.server.to(userId).emit('measurement:completed', {
       jobId,
@@ -130,6 +131,7 @@ export class MeasurementsGateway
       data,
       sensorValues,
       acquisition,
+      channels,
     });
     this.logger.log(
       `✅ Measurement completed - User: ${userId}, ID: ${measurementId}, Points: ${totalPoints}`,

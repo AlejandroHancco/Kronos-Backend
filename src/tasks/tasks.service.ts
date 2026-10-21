@@ -6,7 +6,7 @@ import { ExperimentConfigService } from '../device-plugins/core/experiment-confi
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { MeasureDto } from './dto/measure.dto';
-import { parseAcquisitionSnapshot } from '../measurements/measurement-data';
+import { channelNumbersOf, parseAcquisitionSnapshot, storedPointsOf } from '../measurements/measurement-data';
 
 @Injectable()
 export class TasksService {
@@ -105,6 +105,9 @@ export class TasksService {
 
   async getMeasurements(taskId: number, userId: string) {
     await this.teamScope.assertTaskInTeam(userId, taskId);
+    // measurementChannels y data se cargan en la misma consulta (sin N+1): data solo se expone
+    // en la respuesta para lecturas puntuales (un punto, chico); los barridos mantienen la forma
+    // actual de la lista (sin data completo) para no inflar el payload.
     const measurements = await this.prisma.measurement.findMany({
       where: { taskId },
       orderBy: { takenAt: 'desc' },
@@ -117,15 +120,22 @@ export class TasksService {
         sensorDeviceName: true,
         channelSelectorName: true,
         acquisition: true,
+        data: true,
+        measurementChannels: { select: { channelNumber: true } },
       },
     });
 
-    return measurements.map(m => ({
-      ...m,
-      start: m.start === null ? null : Number(m.start),
-      stop: m.stop === null ? null : Number(m.stop),
-      acquisition: parseAcquisitionSnapshot(m.acquisition),
-    }));
+    return measurements.map(({ measurementChannels, data, ...m }) => {
+      const acquisition = parseAcquisitionSnapshot(m.acquisition);
+      return {
+        ...m,
+        start: m.start === null ? null : Number(m.start),
+        stop: m.stop === null ? null : Number(m.stop),
+        acquisition,
+        channels: channelNumbersOf(measurementChannels),
+        ...(acquisition.kind === 'single' ? { data: storedPointsOf(data) } : {}),
+      };
+    });
   }
 
   async measure(taskId: number, dto: MeasureDto, userId: string) {

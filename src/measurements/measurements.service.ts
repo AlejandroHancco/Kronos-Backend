@@ -14,6 +14,7 @@ import { CreateMeasurementDto } from './dto/create-measurement.dto';
 import {
   buildMeasurementData,
   ChannelResult,
+  channelNumbersOf,
   parseAcquisitionSnapshot,
   parseSensorValues,
   postedMeasurementError,
@@ -22,9 +23,27 @@ import {
 
 const decimalOrNull = (d: Prisma.Decimal | null) => (d === null ? null : Number(d));
 
-/** Medición tal como la devuelve la API: copia del barrido numérica y snapshot de adquisición parseado. */
-function toMeasurementResponse<T extends { start: Prisma.Decimal | null; stop: Prisma.Decimal | null; acquisition: Prisma.JsonValue }>(m: T) {
-  return { ...m, start: decimalOrNull(m.start), stop: decimalOrNull(m.stop), acquisition: parseAcquisitionSnapshot(m.acquisition) };
+const measurementChannelsSelect = { channelNumber: true } satisfies Prisma.MeasurementChannelSelect;
+
+/**
+ * Medición tal como la devuelve la API: copia del barrido numérica, snapshot de adquisición
+ * parseado y `channels` (números de canal medidos, ascendente) a partir de `measurementChannels`
+ * — cargados en la misma consulta (include/select), sin N+1. `measurementChannels` se deja tal
+ * cual (puede traer metadata adicional como el alias) para no perder lo que ya exponía.
+ */
+function toMeasurementResponse<T extends {
+  start: Prisma.Decimal | null;
+  stop: Prisma.Decimal | null;
+  acquisition: Prisma.JsonValue;
+  measurementChannels: { channelNumber: number }[];
+}>(m: T) {
+  return {
+    ...m,
+    start: decimalOrNull(m.start),
+    stop: decimalOrNull(m.stop),
+    acquisition: parseAcquisitionSnapshot(m.acquisition),
+    channels: channelNumbersOf(m.measurementChannels),
+  };
 }
 
 @Injectable()
@@ -113,6 +132,7 @@ export class MeasurementsService {
     const rows = await this.prisma.measurement.findMany({
       where: { task: { project: teamWhere } },
       orderBy: { takenAt: 'desc' },
+      include: { measurementChannels: { select: measurementChannelsSelect } },
     });
     return rows.map(toMeasurementResponse);
   }
@@ -122,6 +142,7 @@ export class MeasurementsService {
     const rows = await this.prisma.measurement.findMany({
       where: { taskId },
       orderBy: { takenAt: 'desc' },
+      include: { measurementChannels: { select: measurementChannelsSelect } },
     });
     return rows.map(toMeasurementResponse);
   }
@@ -130,6 +151,7 @@ export class MeasurementsService {
     await this.teamScope.assertMeasurementInTeam(userId, id);
     const measurement = await this.prisma.measurement.findUnique({
       where: { id },
+      include: { measurementChannels: { select: measurementChannelsSelect } },
     });
 
     if (!measurement) {
@@ -364,6 +386,7 @@ export class MeasurementsService {
           measurementData,
           valueMetas,
           snapshot,
+          uniqueChannels,
       );
 
       this.kronosGateway.emitMeasurementComplete(taskId, {
@@ -382,6 +405,7 @@ export class MeasurementsService {
         data: measurementData,
         sensorValues: valueMetas,
         acquisition: snapshot,
+        channels: uniqueChannels,
       };
 
     } catch (error) {

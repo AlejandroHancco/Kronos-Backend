@@ -3,12 +3,22 @@ import { MeasurementsService } from './measurements.service';
 
 function setup(resolved?: any) {
   const prisma = {
-    measurement: { create: jest.fn(async ({ data }) => data) },
+    measurement: {
+      create: jest.fn(async ({ data }) => data),
+      findUnique: jest.fn<any, any>(async () => null),
+      findFirst: jest.fn<any, any>(async () => null),
+      findMany: jest.fn(async () => []),
+    },
     taskChannel: { findMany: jest.fn(async () => []) },
     measurementChannel: { create: jest.fn(async () => ({})) },
     task: { findUnique: jest.fn(async () => null) },
   };
-  const teamScope = { assertTaskInTeam: jest.fn(), getTeamId: jest.fn(async () => 't1') };
+  const teamScope = {
+    assertTaskInTeam: jest.fn(),
+    getTeamId: jest.fn(async () => 't1'),
+    assertMeasurementInTeam: jest.fn(),
+    projectWhereForUser: jest.fn(async () => ({})),
+  };
   const gateway = { emitMeasurementProgress: jest.fn(), emitMeasurementError: jest.fn(), emitMeasurementCompleted: jest.fn() };
   const kronos = { emitMeasurementComplete: jest.fn() };
   const notifications = {
@@ -44,6 +54,30 @@ describe('MeasurementsService.create (POST /measurements)', () => {
     expect(out.data).toEqual([{ x: 1, values: { g: [1, 2] } }]);
     expect(out.sensorValues).toEqual([{ name: 'g', unit: 'S' }]);
     expect(out.acquisition).toEqual({ kind: 'sweep', variable: { name: 'frequency', unit: 'Hz', label: 'Frecuencia' } });
+  });
+});
+
+describe('MeasurementsService.findOne / getLatest (canales medidos)', () => {
+  it('findOne: expone channels (números ordenados) desde measurementChannels, sin tocar el resto del payload', async () => {
+    const { service, prisma } = setup();
+    prisma.measurement.findUnique.mockResolvedValue({
+      id: 1, start: null, stop: null, acquisition: { kind: 'single' },
+      measurementChannels: [{ channelNumber: 3 }, { channelNumber: 1 }],
+    });
+    const out: any = await service.findOne(1, 'u1');
+    expect(out.channels).toEqual([1, 3]);
+  });
+
+  it('getLatest: expone channels además de la rica measurementChannels (con alias) ya existente', async () => {
+    const { service, prisma } = setup();
+    prisma.measurement.findFirst.mockResolvedValue({
+      id: 2, start: null, stop: null, acquisition: { kind: 'single' },
+      task: { id: 1, name: 'T', project: { uuid: 'p', name: 'P' } },
+      measurementChannels: [{ channelNumber: 2, channelAlias: 'Canal 2' }],
+    });
+    const out: any = await service.getLatest('u1');
+    expect(out.channels).toEqual([2]);
+    expect(out.measurementChannels).toEqual([{ channelNumber: 2, channelAlias: 'Canal 2' }]);
   });
 });
 
@@ -92,7 +126,8 @@ describe('MeasurementsService.measureTask (sensor + selector de canal)', () => {
     const calls: string[] = [];
     const { resolved, selectorPlugin, sensorPlugin } = resolvedWith(calls, true);
     const { service, prisma } = setup(resolved);
-    await service.measureTask(1, 'u1', { ranges, selectedChannels: [2, 1] });
+    const out = await service.measureTask(1, 'u1', { ranges, selectedChannels: [2, 1] });
+    expect(out.channels).toEqual([1, 2]);
     expect(calls).toEqual(['set:1', 'get:1', 'get:3', 'set:2', 'get:1', 'get:3']);
     expect(selectorPlugin.setActuatorData).toHaveBeenCalledWith(selectorCtx, 'kronos-mux-16-channel', { channel: 1 });
     expect(sensorPlugin.getSensorData).toHaveBeenCalledWith(sensorCtx, { kind: 'sweep', start: 1, stop: 2, points: 2, scale: 'LOG' });
@@ -109,6 +144,8 @@ describe('MeasurementsService.measureTask (sensor + selector de canal)', () => {
     expect(data.data.map((p: any) => p.x)).toEqual([1, 3]);
     expect(out.acquisition).toEqual(snapshot);
     expect(gateway.emitMeasurementCompleted.mock.calls[0][7]).toEqual(snapshot);
+    expect(out.channels).toEqual([1]);
+    expect(gateway.emitMeasurementCompleted.mock.calls[0][8]).toEqual([1]);
   });
 
   it('sin selector: solo getSensorData, una vez por rango', async () => {
@@ -169,6 +206,7 @@ describe('MeasurementsService.measureTask (sensor + selector de canal)', () => {
     expect(data.data).toHaveLength(1);
     expect('x' in data.data[0]).toBe(false);
     expect(out.acquisition).toEqual({ kind: 'single' });
+    expect(out.channels).toEqual([1]);
   });
 
   it('libera los dispositivos aunque getSensorData o el guardado fallen', async () => {

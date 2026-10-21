@@ -146,6 +146,7 @@ export class ReportsService {
       select: {
         id: true, takenAt: true, takenByName: true, presetName: true, scale: true, acquisition: true,
         watcherStatus: true, watcherReason: true,
+        data: true,
         measurementChannels: { select: channelSelect },
       },
     });
@@ -192,11 +193,18 @@ export class ReportsService {
             })),
           }
         : null,
-      measurements: measurements.map(({ measurementChannels, acquisition, ...m }) => ({
-        ...m,
-        acquisition: parseAcquisitionSnapshot(acquisition),
-        channels: measurementChannels.map(toCsvChannel),
-      })),
+      // `data` solo para lecturas puntuales (un punto, chico): evita el N+1 que hoy obliga al
+      // frontend a pedir el detalle de cada medición para armar la serie de tiempo. Los barridos
+      // mantienen la forma actual del reporte (sin `data` completo en la lista).
+      measurements: measurements.map(({ measurementChannels, acquisition, data, ...m }) => {
+        const snapshot = parseAcquisitionSnapshot(acquisition);
+        return {
+          ...m,
+          acquisition: snapshot,
+          channels: measurementChannels.map(toCsvChannel),
+          ...(snapshot.kind === 'single' ? { data: storedPointsOf(data) } : {}),
+        };
+      }),
       latest: latest
         ? {
             id: latest.id,
