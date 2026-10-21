@@ -1,4 +1,5 @@
-import type { MeasuredPoint, SweepParams } from '../../core/device-plugin.interface';
+import type { AcquisitionRequest } from '../../core/acquisition';
+import type { MeasuredPoint } from '../../core/device-plugin.interface';
 
 /** Puerto SCPI/TCP del Hioki IM3570 (fijo, como hasta ahora). */
 export const HIOKI_SCPI_PORT = 3570;
@@ -7,11 +8,11 @@ export const HIOKI_SCPI_PORT = 3570;
 export const MEASURE_QUERY = ':MEASure?';
 
 /** Comandos que se envían antes de cada barrido (modo analizador, G y B fijos porque Kronos declara g y b). */
-export function sweepSetupCommands(s: SweepParams): string[] {
+export function sweepSetupCommands(r: Extract<AcquisitionRequest, { kind: 'sweep' }>): string[] {
   return [
     ':MODE ANALyzer',
     ':SWEep:TRIGger SEQuential',
-    `:LIST:STARt:STOP ${s.startFreq},${s.stopFreq},${s.points},${s.sweepType}`,
+    `:LIST:STARt:STOP ${r.start},${r.stop},${r.points},${r.scale}`,
     ':PARameter1 G',
     ':PARameter3 B',
     '*TRG',
@@ -26,7 +27,7 @@ export function parseGbResponse(csv: string): MeasuredPoint[] {
     const frequency = parseFloat(fields[i]);
     const g = parseFloat(fields[i + 1]);
     const b = parseFloat(fields[i + 2]);
-    if (!isNaN(frequency) && !isNaN(g) && !isNaN(b)) points.push({ frequency, values: { g, b } });
+    if (!isNaN(frequency) && !isNaN(g) && !isNaN(b)) points.push({ x: frequency, values: { g, b } });
   }
   return points;
 }

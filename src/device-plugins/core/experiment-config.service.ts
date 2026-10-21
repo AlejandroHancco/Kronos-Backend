@@ -18,7 +18,7 @@ import {
 import { ExperimentDefinition, experimentFor } from './experiments';
 
 export interface ResolvedExperiment {
-  preference: TaskPreference & { analyzerDevice: Device; muxDevice: Device | null; ranges: TaskPreferenceRange[] };
+  preference: TaskPreference & { sensorDevice: Device; channelSelectorDevice: Device | null; ranges: TaskPreferenceRange[] };
   sensor: { plugin: SensorPlugin; description: DeviceServiceDescription; context: DeviceContext };
   selector: {
     plugin: ActuatorPlugin;
@@ -40,20 +40,20 @@ const mismatch = (d: { name: string; type: string | null }, what: string) =>
 export class ExperimentConfigService {
   constructor(private prisma: PrismaService, private registry: DevicePluginRegistry) {}
 
-  async assertValidConfig(taskId: number, analyzerDeviceId: string, muxDeviceId: string | null): Promise<void> {
+  async assertValidConfig(taskId: number, sensorDeviceId: string, channelSelectorDeviceId: string | null): Promise<void> {
     const task = await this.prisma.task.findUnique({ where: { id: taskId }, select: { projectId: true } });
     if (!task) throw new NotFoundException('Task not found');
-    const sensor = await this.prisma.device.findUnique({ where: { id: analyzerDeviceId } });
+    const sensor = await this.prisma.device.findUnique({ where: { id: sensorDeviceId } });
     if (!sensor) throw new NotFoundException('Equipo de medición no encontrado');
-    const mux = muxDeviceId ? await this.prisma.device.findUnique({ where: { id: muxDeviceId } }) : null;
-    if (muxDeviceId && !mux) throw new NotFoundException('MUX no encontrado');
+    const selector = channelSelectorDeviceId ? await this.prisma.device.findUnique({ where: { id: channelSelectorDeviceId } }) : null;
+    if (channelSelectorDeviceId && !selector) throw new NotFoundException('Selector de canal no encontrado');
     const sensorRole = this.registry.role(sensor.type);
     const error = experimentConfigError({
       taskProjectId: task.projectId,
       sensor,
-      selector: mux,
+      selector,
       sensorRole,
-      selectorRole: mux ? this.registry.role(mux.type) : undefined,
+      selectorRole: selector ? this.registry.role(selector.type) : undefined,
       sensorDescription: sensorRole === 'sensor' ? this.registry.describe(sensor.type!) : undefined,
     });
     if (error) throw new BadRequestException(error);
@@ -63,11 +63,11 @@ export class ExperimentConfigService {
   async resolve(taskId: number): Promise<ResolvedExperiment | null> {
     const preference = await this.prisma.taskPreference.findFirst({
       where: { taskId }, orderBy: { createdAt: 'desc' },
-      include: { analyzerDevice: true, muxDevice: true, ranges: { orderBy: { order: 'asc' } } },
+      include: { sensorDevice: true, channelSelectorDevice: true, ranges: { orderBy: { order: 'asc' } } },
     });
     if (!preference) return null;
-    const s = preference.analyzerDevice;
-    const m = preference.muxDevice;
+    const s = preference.sensorDevice;
+    const m = preference.channelSelectorDevice;
     if (this.registry.role(s.type) !== 'sensor') throw new BadRequestException(mismatch(s, 'un equipo de medición'));
     if (m && this.registry.role(m.type) !== 'channel-selector') throw new BadRequestException(mismatch(m, 'un selector de canal'));
 
@@ -109,16 +109,16 @@ export class ExperimentConfigService {
   }
 
   /** Para mostrar (GET /tasks/:id): nunca lanza; tipos sin plugin o con rol incorrecto caen a valores por defecto. */
-  summarize(pref: { analyzerDevice: { type: string | null }; muxDevice: { type: string | null } | null }) {
-    const m = pref.muxDevice;
+  summarize(pref: { sensorDevice: { type: string | null }; channelSelectorDevice: { type: string | null } | null }) {
+    const m = pref.channelSelectorDevice;
     const selectorDescription = m && this.registry.role(m.type) === 'channel-selector' ? this.registry.describe(m.type!) : null;
     const channelRange = channelRangeFor(selectorDescription);
-    const found = experimentFor(this.registry.catalog(), pref.analyzerDevice.type, m?.type ?? null);
+    const found = experimentFor(this.registry.catalog(), pref.sensorDevice.type, m?.type ?? null);
     const experiment = found ? { experimentId: found.experimentId, fullName: found.fullName } : null;
-    if (this.registry.role(pref.analyzerDevice.type) !== 'sensor') {
+    if (this.registry.role(pref.sensorDevice.type) !== 'sensor') {
       return { channelRange, sensorValues: [], simulated: false, experiment, acquisition: null };
     }
-    const d = this.registry.describe(pref.analyzerDevice.type!);
+    const d = this.registry.describe(pref.sensorDevice.type!);
     return { channelRange, sensorValues: valueMetasOf(d), simulated: d.simulated, experiment, acquisition: acquisitionOf(d) };
   }
 }

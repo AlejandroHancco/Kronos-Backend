@@ -21,44 +21,45 @@ function setup(resolved?: any) {
     prisma as any, teamScope as any, gateway as any, kronos as any, notifications as any, experimentConfig as any,
     deviceActivity as any,
   );
-  return { service, prisma, notifications, deviceActivity, release };
+  return { service, prisma, gateway, notifications, deviceActivity, release };
 }
 
 const base = {
-  taskId: 1, takenBy: '00000000-0000-0000-0000-000000000000', startFreq: 1, stopFreq: 2, points: 1,
-  sweepType: 'LOG', analyzerName: 'A', analyzerIp: '10.0.0.1',
+  taskId: 1, takenBy: '00000000-0000-0000-0000-000000000000', start: 1, stop: 2, points: 1,
+  scale: 'LOG', sensorDeviceName: 'A', sensorDeviceIp: '10.0.0.1',
 };
 
 describe('MeasurementsService.create (POST /measurements)', () => {
   it('rechaza contenido inválido con 400 y no guarda', async () => {
     const { service, prisma } = setup();
-    await expect(service.create({ ...base, sensorValues: [{ name: 'g', unit: 'S' }], data: [{ frequency: 1, values: { z: [1] } }] }, 'u1'))
+    await expect(service.create({ ...base, sensorValues: [{ name: 'g', unit: 'S' }], data: [{ x: 1, values: { z: [1] } }] }, 'u1'))
       .rejects.toThrow(BadRequestException);
     expect(prisma.measurement.create).not.toHaveBeenCalled();
   });
-  it('guarda un payload válido conservando solo { frequency, values }', async () => {
+  it('guarda un payload válido conservando solo { x, values } y el snapshot de barrido en frecuencia', async () => {
     const { service } = setup();
     const out: any = await service.create({
-      ...base, sensorValues: [{ name: 'g', unit: 'S' }], data: [{ frequency: 1, values: { g: [1, 2] }, extra: 1 }],
+      ...base, sensorValues: [{ name: 'g', unit: 'S' }], data: [{ x: 1, values: { g: [1, 2] }, extra: 1 }],
     }, 'u1');
-    expect(out.data).toEqual([{ frequency: 1, values: { g: [1, 2] } }]);
+    expect(out.data).toEqual([{ x: 1, values: { g: [1, 2] } }]);
     expect(out.sensorValues).toEqual([{ name: 'g', unit: 'S' }]);
+    expect(out.acquisition).toEqual({ kind: 'sweep', variable: { name: 'frequency', unit: 'Hz', label: 'Frecuencia' } });
   });
 });
 
 describe('MeasurementsService.measureTask (sensor + selector de canal)', () => {
   const ranges = [
-    { startFreq: 1, stopFreq: 2, points: 2, sweepType: 'LOG' as const },
-    { startFreq: 3, stopFreq: 4, points: 2, sweepType: 'LOG' as const },
+    { start: 1, stop: 2, points: 2, scale: 'LOG' },
+    { start: 3, stop: 4, points: 3, scale: 'LOG' },
   ];
   const sensorCtx = { id: 's1', name: 'Sim', ip: null, configuration: {} };
   const selectorCtx = { id: 'm1', name: 'Mux', ip: '10.0.0.2', configuration: {} };
 
   function resolvedWith(calls: string[], withSelector: boolean) {
     const sensorPlugin = {
-      getSensorData: jest.fn(async (_ctx: unknown, sweep: { startFreq: number }) => {
-        calls.push(`get:${sweep.startFreq}`);
-        return [{ frequency: sweep.startFreq, values: { z: 1 } }];
+      getSensorData: jest.fn(async (_ctx: unknown, request: { start: number }) => {
+        calls.push(`get:${request.start}`);
+        return [{ x: request.start, values: { z: 1 } }];
       }),
     };
     const selectorPlugin = {
@@ -70,8 +71,8 @@ describe('MeasurementsService.measureTask (sensor + selector de canal)', () => {
       sensorPlugin, selectorPlugin,
       resolved: {
         preference: {
-          name: 'cfg', analyzerDevice: { name: 'Sim', type: 'sim-impedance', ip: null },
-          muxDevice: withSelector ? { name: 'Mux', type: 'kronos-mux-16', ip: '10.0.0.2' } : null,
+          name: 'cfg', sensorDevice: { name: 'Sim', type: 'sim-impedance', ip: null },
+          channelSelectorDevice: withSelector ? { name: 'Mux', type: 'kronos-mux-16', ip: '10.0.0.2' } : null,
         },
         sensor: { plugin: sensorPlugin, description: {}, context: sensorCtx },
         selector: withSelector
@@ -79,6 +80,10 @@ describe('MeasurementsService.measureTask (sensor + selector de canal)', () => {
           : null,
         channelRange: withSelector ? { min: 1, max: 16 } : { min: 1, max: 1 },
         valueMetas: [{ name: 'z', unit: 'Ω' }],
+        acquisition: {
+          kind: 'sweep', variable: { name: 'frequency', unit: 'Hz', label: 'Frecuencia', rangeMinimum: 1, rangeMaximum: 10 },
+          points: { minimum: 1, maximum: 801 }, scales: ['LIN', 'LOG'], secondsPerPoint: 0.01,
+        },
       },
     };
   }
@@ -90,8 +95,20 @@ describe('MeasurementsService.measureTask (sensor + selector de canal)', () => {
     await service.measureTask(1, 'u1', { ranges, selectedChannels: [2, 1] });
     expect(calls).toEqual(['set:1', 'get:1', 'get:3', 'set:2', 'get:1', 'get:3']);
     expect(selectorPlugin.setActuatorData).toHaveBeenCalledWith(selectorCtx, 'kronos-mux-16-channel', { channel: 1 });
-    expect(sensorPlugin.getSensorData).toHaveBeenCalledWith(sensorCtx, ranges[0]);
-    expect(prisma.measurement.create.mock.calls[0][0].data).toMatchObject({ muxName: 'Mux', muxIp: '10.0.0.2', analyzerName: 'Sim' });
+    expect(sensorPlugin.getSensorData).toHaveBeenCalledWith(sensorCtx, { kind: 'sweep', start: 1, stop: 2, points: 2, scale: 'LOG' });
+    expect(prisma.measurement.create.mock.calls[0][0].data).toMatchObject({ channelSelectorName: 'Mux', channelSelectorIp: '10.0.0.2', sensorDeviceName: 'Sim' });
+  });
+
+  it('guarda la copia genérica del barrido, el snapshot de adquisición y puntos { x, values }', async () => {
+    const { resolved } = resolvedWith([], false);
+    const { service, prisma, gateway } = setup(resolved);
+    const out = await service.measureTask(1, 'u1', { ranges, selectedChannels: [1] });
+    const snapshot = { kind: 'sweep', variable: { name: 'frequency', unit: 'Hz', label: 'Frecuencia' } };
+    const data = prisma.measurement.create.mock.calls[0][0].data;
+    expect(data).toMatchObject({ start: 1, stop: 4, points: 5, scale: 'LOG', acquisition: snapshot, sensorDeviceIp: null });
+    expect(data.data.map((p: any) => p.x)).toEqual([1, 3]);
+    expect(out.acquisition).toEqual(snapshot);
+    expect(gateway.emitMeasurementCompleted.mock.calls[0][7]).toEqual(snapshot);
   });
 
   it('sin selector: solo getSensorData, una vez por rango', async () => {
@@ -101,7 +118,7 @@ describe('MeasurementsService.measureTask (sensor + selector de canal)', () => {
     await service.measureTask(1, 'u1', { ranges, selectedChannels: [1] });
     expect(calls).toEqual(['get:1', 'get:3']);
     expect(sensorPlugin.getSensorData).toHaveBeenCalledTimes(2);
-    expect(prisma.measurement.create.mock.calls[0][0].data).toMatchObject({ muxName: null, muxIp: null });
+    expect(prisma.measurement.create.mock.calls[0][0].data).toMatchObject({ channelSelectorName: null, channelSelectorIp: null });
   });
 
   it('marca sensor y selector como ocupados durante la medición y los libera al terminar', async () => {

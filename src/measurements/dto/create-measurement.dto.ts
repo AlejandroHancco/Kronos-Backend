@@ -12,34 +12,39 @@ export class CreateMeasurementDto {
   @IsString()
   presetName?: string;
 
+  @IsOptional()
   @IsNumber()
-  startFreq: number;
+  start?: number;
 
+  @IsOptional()
   @IsNumber()
-  stopFreq: number;
+  stop?: number;
 
+  @IsOptional()
   @IsNumber()
-  points: number;
-
-  @IsString()
-  sweepType: string;
-
-  @IsString()
-  analyzerName: string;
-
-  @IsString()
-  analyzerIp: string;
+  points?: number;
 
   @IsOptional()
   @IsString()
-  muxName?: string;
+  scale?: string;
+
+  @IsString()
+  sensorDeviceName: string;
 
   @IsOptional()
   @IsString()
-  muxIp?: string;
+  sensorDeviceIp?: string;
+
+  @IsOptional()
+  @IsString()
+  channelSelectorName?: string;
+
+  @IsOptional()
+  @IsString()
+  channelSelectorIp?: string;
 
   /** JSONB: StoredMeasurementPoint[]; contenido validado por postedMeasurementError (measurement-data.ts). */
-  @IsArray({ message: 'data debe ser un arreglo de puntos { frequency, values }' })
+  @IsArray({ message: 'data debe ser un arreglo de puntos { x, values }' })
   @ArrayMaxSize(MAX_POSTED_POINTS, { message: `data admite como máximo ${MAX_POSTED_POINTS} puntos` })
   data: unknown[];
 

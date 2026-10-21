@@ -20,7 +20,7 @@ class IsGreaterThanConstraint implements ValidatorConstraintInterface {
   }
 }
 
-/** Valida que este campo sea numéricamente mayor que otro campo del mismo objeto (ej. stopFreq > startFreq). */
+/** Valida que este campo sea numéricamente mayor que otro campo del mismo objeto (ej. stop > start). */
 export function IsGreaterThan(relatedProperty: string, options?: ValidationOptions) {
   return function (object: object, propertyName: string) {
     registerDecorator({

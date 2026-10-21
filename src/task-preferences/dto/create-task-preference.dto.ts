@@ -1,4 +1,5 @@
 import {
+  IsArray,
   IsIn,
   IsInt,
   IsNotEmpty,
@@ -6,7 +7,6 @@ import {
   IsOptional,
   IsString,
   IsUUID,
-  Max,
   MaxLength,
   Min,
   ValidateNested,
@@ -20,23 +20,20 @@ export class TaskPreferenceRangeDto {
   order: number;
 
   @IsNumber()
-  @Min(1)
-  startFreq: number;
+  start: number;
 
   @IsNumber()
-  @Min(1)
-  @IsGreaterThan('startFreq', { message: 'stopFreq debe ser mayor que startFreq' })
-  stopFreq: number;
+  @IsGreaterThan('start', { message: 'stop debe ser mayor que start' })
+  stop: number;
 
   @IsOptional()
   @IsInt()
   @Min(1)
-  @Max(801)
   points?: number;
 
   @IsOptional()
   @IsIn(['LOG', 'LIN'])
-  sweepType?: string;
+  scale?: string;
 }
 
 export class CreateTaskPreferenceDto {
@@ -46,13 +43,14 @@ export class CreateTaskPreferenceDto {
   name: string;
 
   @IsUUID()
-  analyzerDeviceId: string;
+  sensorDeviceId: string;
 
   @IsOptional()
   @IsUUID()
-  muxDeviceId?: string | null;
+  channelSelectorDeviceId?: string | null;
 
-  @IsNotEmpty()
+  /** Puede venir vacío (lecturas puntuales); la validación por sensor es de B3. */
+  @IsArray()
   @ValidateNested({ each: true })
   @Type(() => TaskPreferenceRangeDto)
   ranges: TaskPreferenceRangeDto[];

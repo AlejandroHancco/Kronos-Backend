@@ -3,7 +3,8 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectQueue } from '@nestjs/bull';
 import type { Queue } from 'bull';
 import { PrismaService } from '../prisma/prisma.service';
-import { MeasurementsService, MeasurementRange } from '../measurements/measurements.service';
+import { MeasurementsService } from '../measurements/measurements.service';
+import type { SweepRange } from '../device-plugins/core/acquisition';
 import { KronosGateway } from '../gateway/kronos.gateway';
 import { MEASUREMENTS_QUEUE } from '../queue/queue.constants';
 import {
@@ -125,11 +126,11 @@ export class SchedulerService {
     // Reservar los devices para el resto del tick
     deviceIdsOf(preference).forEach((id) => busyDevices.add(id));
 
-    const ranges: MeasurementRange[] = preference.ranges.map((r) => ({
-      startFreq: Number(r.startFreq),
-      stopFreq: Number(r.stopFreq),
+    const ranges: SweepRange[] = preference.ranges.map((r) => ({
+      start: Number(r.start),
+      stop: Number(r.stop),
       points: r.points,
-      sweepType: r.sweepType as 'LOG' | 'LIN',
+      scale: r.scale,
     }));
 
     const payload: MeasurementJobData = {

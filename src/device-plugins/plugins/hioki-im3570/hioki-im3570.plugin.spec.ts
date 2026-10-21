@@ -49,7 +49,13 @@ describe('HiokiIm3570Plugin', () => {
 
   it('getSensorData sin IP falla con un mensaje claro (no intenta localhost)', async () => {
     await expect(
-      plugin.getSensorData({ id: 'h', name: 'Hioki lab', ip: null, configuration: {} }, { startFreq: 1, stopFreq: 2, points: 2, sweepType: 'LOG' }),
+      plugin.getSensorData({ id: 'h', name: 'Hioki lab', ip: null, configuration: {} }, { kind: 'sweep', start: 1, stop: 2, points: 2, scale: 'LOG' }),
     ).rejects.toThrow('El equipo "Hioki lab" no tiene IP configurada');
+  });
+
+  it('getSensorData rechaza lecturas puntuales', async () => {
+    await expect(
+      plugin.getSensorData({ id: 'h', name: 'Hioki lab', ip: '10.0.0.5', configuration: {} }, { kind: 'single' }),
+    ).rejects.toThrow('El Hioki IM3570 solo hace barridos');
   });
 });

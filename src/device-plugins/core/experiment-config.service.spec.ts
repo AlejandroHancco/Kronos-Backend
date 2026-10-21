@@ -8,9 +8,9 @@ import { SimulatedImpedancePlugin } from '../plugins/sim-impedance/sim-impedance
 const registry = new DevicePluginRegistry([new HiokiIm3570Plugin(), new KronosMux16Plugin(), new SimulatedImpedancePlugin()]);
 const device = (id: string, type: string | null, configuration: unknown = null) =>
   ({ id, name: `Dev ${id}`, type, ip: '10.0.0.1', projectId: 'P', configuration });
-const serviceWith = (analyzerDevice: unknown, muxDevice: unknown) =>
+const serviceWith = (sensorDevice: unknown, channelSelectorDevice: unknown) =>
   new ExperimentConfigService({
-    taskPreference: { findFirst: jest.fn(async () => ({ id: 1, name: 'cfg', analyzerDevice, muxDevice, ranges: [] })) },
+    taskPreference: { findFirst: jest.fn(async () => ({ id: 1, name: 'cfg', sensorDevice, channelSelectorDevice, ranges: [] })) },
   } as any, registry);
 
 describe('ExperimentConfigService.resolve', () => {
@@ -44,19 +44,19 @@ describe('ExperimentConfigService.resolve', () => {
 describe('ExperimentConfigService.summarize', () => {
   const s = serviceWith(null, null);
   it('rango del selector; selector con rol incorrecto o sensor desconocido no lanzan', () => {
-    expect(s.summarize({ analyzerDevice: { type: 'hioki-im3570' }, muxDevice: { type: 'kronos-mux-16' } }))
+    expect(s.summarize({ sensorDevice: { type: 'hioki-im3570' }, channelSelectorDevice: { type: 'kronos-mux-16' } }))
       .toMatchObject({ channelRange: { min: 1, max: 16 }, simulated: false });
-    expect(s.summarize({ analyzerDevice: { type: 'hioki-im3570' }, muxDevice: { type: 'mux' } }).channelRange).toEqual({ min: 1, max: 1 });
-    expect(s.summarize({ analyzerDevice: { type: 'analyzer' }, muxDevice: null })).toEqual({
+    expect(s.summarize({ sensorDevice: { type: 'hioki-im3570' }, channelSelectorDevice: { type: 'mux' } }).channelRange).toEqual({ min: 1, max: 1 });
+    expect(s.summarize({ sensorDevice: { type: 'analyzer' }, channelSelectorDevice: null })).toEqual({
       channelRange: { min: 1, max: 1 }, sensorValues: [], simulated: false, experiment: null, acquisition: null,
     });
   });
 
   it('experimento con nombre por tipos; tipo desconocido → null', () => {
-    expect(s.summarize({ analyzerDevice: { type: 'hioki-im3570' }, muxDevice: { type: 'kronos-mux-16' } }).experiment)
+    expect(s.summarize({ sensorDevice: { type: 'hioki-im3570' }, channelSelectorDevice: { type: 'kronos-mux-16' } }).experiment)
       .toEqual({ experimentId: 'hioki-im3570+kronos-mux-16', fullName: 'Hioki IM3570 + MUX Kronos 16' });
-    expect(s.summarize({ analyzerDevice: { type: 'hioki-im3570' }, muxDevice: null }).experiment)
+    expect(s.summarize({ sensorDevice: { type: 'hioki-im3570' }, channelSelectorDevice: null }).experiment)
       .toEqual({ experimentId: 'hioki-im3570', fullName: 'Hioki IM3570' });
-    expect(s.summarize({ analyzerDevice: { type: 'hioki-im3570' }, muxDevice: { type: 'mux' } }).experiment).toBeNull();
+    expect(s.summarize({ sensorDevice: { type: 'hioki-im3570' }, channelSelectorDevice: { type: 'mux' } }).experiment).toBeNull();
   });
 });

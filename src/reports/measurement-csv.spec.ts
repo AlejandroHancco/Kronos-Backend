@@ -15,8 +15,8 @@ const base: CsvMeasurement = {
   presetName: 'Default',
   watcherStatus: 'correct',
   data: [
-    { frequency: 1000, values: { g: [0.1, 0.2, 0, 0], b: [0.01, 0.02, 0, 0] } },
-    { frequency: 2000, values: { g: [0.3, 0.4, 0, 0], b: [0.03, 0.04, 0, 0] } },
+    { x: 1000, values: { g: [0.1, 0.2, 0, 0], b: [0.01, 0.02, 0, 0] } },
+    { x: 2000, values: { g: [0.3, 0.4, 0, 0], b: [0.03, 0.04, 0, 0] } },
   ],
   sensorValues: [{ name: 'g', unit: 'S' }, { name: 'b', unit: 'S' }],
   channels: [channel(2), channel(1)],
@@ -66,7 +66,7 @@ describe('buildCsv', () => {
     const withComma: CsvMeasurement = {
       ...base,
       channels: [{ ...channel(1), notes: 'ok, revisar' }],
-      data: [{ frequency: 1000, values: { g: [0.1], b: [0.01] } }],
+      data: [{ x: 1000, values: { g: [0.1], b: [0.01] } }],
     };
     const csv = buildCsv([], [withComma]);
     expect(csv).toContain('"ok, revisar"');
@@ -112,7 +112,7 @@ describe('csvPreamble / rowsToCsvLines', () => {
 
 describe('columnas dinámicas', () => {
   const sim: CsvMeasurement = { ...base, id: 40, sensorValues: [{ name: 'z', unit: 'Ω' }],
-    data: [{ frequency: 1000, values: { z: [1500] } }], channels: [channel(1)] };
+    data: [{ x: 1000, values: { z: [1500] } }], channels: [channel(1)] };
 
   it('unitSlug y nombre de columna', () => {
     expect(['S', 'Ω', 'kΩ', '°', ''].map(unitSlug)).toEqual(['s', 'ohm', 'kohm', 'deg', '']);
@@ -127,7 +127,7 @@ describe('columnas dinámicas', () => {
   });
 
   it('el formato legado ({frequency, g, b}) no produce filas', () => {
-    const legacy = { ...base, data: [{ frequency: 1000, g: [0.1], b: [0.01] }] };
+    const legacy = { ...base, data: [{ frequency: 1000, g: [0.1], b: [0.01] }] }; // legado
     expect(measurementToRows(legacy, valueColumnsFor([{ name: 'g', unit: 'S' }]))).toEqual([]);
   });
 });

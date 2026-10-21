@@ -98,7 +98,7 @@ export class DevicesService {
       if (updateDeviceDto.type !== device.type) {
         // Cambiar el tipo invalidaría las configuraciones de tareas que ya lo usan como equipo/MUX.
         const usageCount = await this.prisma.taskPreference.count({
-          where: { OR: [{ analyzerDeviceId: deviceId }, { muxDeviceId: deviceId }] },
+          where: { OR: [{ sensorDeviceId: deviceId }, { channelSelectorDeviceId: deviceId }] },
         });
         if (usageCount > 0) {
           throw new BadRequestException(
@@ -139,8 +139,8 @@ export class DevicesService {
     const usageCount = await this.prisma.taskPreference.count({
       where: {
         OR: [
-          { analyzerDeviceId: deviceId },
-          { muxDeviceId: deviceId },
+          { sensorDeviceId: deviceId },
+          { channelSelectorDeviceId: deviceId },
         ],
       },
     });
@@ -213,7 +213,7 @@ export class DevicesService {
     if (role === 'sensor') {
       // Aproximación: mediciones de tareas cuya preferencia ACTUAL usa este dispositivo.
       const last = await this.prisma.measurement.findFirst({
-        where: { task: { taskPreferences: { some: { analyzerDeviceId: device.id } } } },
+        where: { task: { taskPreferences: { some: { sensorDeviceId: device.id } } } },
         orderBy: { takenAt: { sort: 'desc', nulls: 'last' } },
         select: { takenAt: true },
       });

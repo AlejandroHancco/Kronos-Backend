@@ -7,8 +7,8 @@ import { SimulatedImpedancePlugin } from '../device-plugins/plugins/sim-impedanc
 
 const device = (id: string, type: string) => ({ id, name: id, type, ip: null, projectId: 'P' });
 const savedPref = (analyzer: ReturnType<typeof device>, mux: ReturnType<typeof device> | null) => ({
-  id: 1, taskId: 7, name: 'cfg', analyzerDeviceId: analyzer.id, muxDeviceId: mux?.id ?? null,
-  analyzerDevice: analyzer, muxDevice: mux, ranges: [], createdAt: new Date(0), updatedAt: new Date(0),
+  id: 1, taskId: 7, name: 'cfg', sensorDeviceId: analyzer.id, channelSelectorDeviceId: mux?.id ?? null,
+  sensorDevice: analyzer, channelSelectorDevice: mux, ranges: [], createdAt: new Date(0), updatedAt: new Date(0),
 });
 
 function setup(pref: ReturnType<typeof savedPref>) {
@@ -35,7 +35,7 @@ function setup(pref: ReturnType<typeof savedPref>) {
 describe('TaskPreferencesService.updateTaskPreference (jobs programados)', () => {
   it('advierte los jobs pendientes con canales fuera del nuevo rango (sin MUX → solo canal 1)', async () => {
     const { service, prisma } = setup(savedPref(device('sim', 'sim-impedance'), null));
-    const out = await service.updateTaskPreference(7, { analyzerDeviceId: 'sim', muxDeviceId: null }, 'u1');
+    const out = await service.updateTaskPreference(7, { sensorDeviceId: 'sim', channelSelectorDeviceId: null }, 'u1');
     expect(prisma.scheduledJob.findMany).toHaveBeenCalledWith({
       where: { taskId: 7, status: 'pending' }, select: { id: true, channelNumbers: true },
     });

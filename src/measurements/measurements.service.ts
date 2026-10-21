@@ -9,14 +9,22 @@ import { classifyMeasurement, MeasurementClassification } from './kronos-watcher
 import { ExperimentConfigService } from '../device-plugins/core/experiment-config.service';
 import { DeviceActivityService } from '../device-plugins/core/device-activity.service';
 import type { MeasuredPoint } from '../device-plugins/core/device-plugin.interface';
+import { requestsFor, snapshotOf, type SweepRange } from '../device-plugins/core/acquisition';
 import { CreateMeasurementDto } from './dto/create-measurement.dto';
-import { buildMeasurementData, ChannelResult, parseSensorValues, postedMeasurementError, storedPointsOf } from './measurement-data';
+import {
+  buildMeasurementData,
+  ChannelResult,
+  parseAcquisitionSnapshot,
+  parseSensorValues,
+  postedMeasurementError,
+  storedPointsOf,
+} from './measurement-data';
 
-export interface MeasurementRange {
-  startFreq: number;
-  stopFreq: number;
-  points: number;
-  sweepType: 'LOG' | 'LIN';
+const decimalOrNull = (d: Prisma.Decimal | null) => (d === null ? null : Number(d));
+
+/** Medición tal como la devuelve la API: copia del barrido numérica y snapshot de adquisición parseado. */
+function toMeasurementResponse<T extends { start: Prisma.Decimal | null; stop: Prisma.Decimal | null; acquisition: Prisma.JsonValue }>(m: T) {
+  return { ...m, start: decimalOrNull(m.start), stop: decimalOrNull(m.stop), acquisition: parseAcquisitionSnapshot(m.acquisition) };
 }
 
 @Injectable()
@@ -63,7 +71,7 @@ export class MeasurementsService {
   async getLatest(userId: string) {
     const teamWhere = await this.teamScope.projectWhereForUser(userId);
 
-    return this.prisma.measurement.findFirst({
+    const latest = await this.prisma.measurement.findFirst({
       where: { task: { project: teamWhere } },
       orderBy: { takenAt: 'desc' },
       include: {
@@ -79,6 +87,7 @@ export class MeasurementsService {
         },
       },
     });
+    return latest && toMeasurementResponse(latest);
   }
 
   async create(createMeasurementDto: CreateMeasurementDto, userId: string) {
@@ -90,26 +99,30 @@ export class MeasurementsService {
       data: {
         ...rest,
         sensorValues: parseSensorValues(sensorValues) as unknown as Prisma.InputJsonValue,
-        // Solo { frequency, values } por punto (claves extra descartadas)
-        data: storedPointsOf(data).map(({ frequency, values }) => ({ frequency, values })) as unknown as Prisma.InputJsonValue,
+        // Hasta B4, POST /measurements solo admite barridos en frecuencia ({ x, values })
+        acquisition: parseAcquisitionSnapshot(undefined) as unknown as Prisma.InputJsonValue,
+        // Solo { x, values } por punto (claves extra descartadas)
+        data: storedPointsOf(data).map(({ x, values }) => ({ x, values })) as unknown as Prisma.InputJsonValue,
       },
     });
   }
 
   async findAll(userId: string) {
     const teamWhere = await this.teamScope.projectWhereForUser(userId);
-    return this.prisma.measurement.findMany({
+    const rows = await this.prisma.measurement.findMany({
       where: { task: { project: teamWhere } },
       orderBy: { takenAt: 'desc' },
     });
+    return rows.map(toMeasurementResponse);
   }
 
   async findByTask(taskId: number, userId: string) {
     await this.teamScope.assertTaskInTeam(userId, taskId);
-    return this.prisma.measurement.findMany({
+    const rows = await this.prisma.measurement.findMany({
       where: { taskId },
       orderBy: { takenAt: 'desc' },
     });
+    return rows.map(toMeasurementResponse);
   }
 
   async findOne(id: number, userId: string) {
@@ -122,11 +135,7 @@ export class MeasurementsService {
       return null;
     }
 
-    return {
-      ...measurement,
-      startFreq: Number(measurement.startFreq),
-      stopFreq:  Number(measurement.stopFreq),
-    };
+    return toMeasurementResponse(measurement);
   }
 
   async remove(id: number, userId: string) {
@@ -181,7 +190,7 @@ export class MeasurementsService {
       taskId: number,
       userId: string,
       params: {
-        ranges: MeasurementRange[];
+        ranges: SweepRange[];
         selectedChannels: number[];
         jobId?: string;
         scheduledJobId?: number;
@@ -214,16 +223,16 @@ export class MeasurementsService {
       );
 
       // 1. Experimento activo (sensor + selector opcional + rango de canales) — valida canales contra lo declarado
-      const { preference: taskPreference, sensor, selector, channelRange, valueMetas } =
+      const { preference: taskPreference, sensor, selector, channelRange, valueMetas, acquisition } =
           await this.experimentConfig.assertChannels(taskId, uniqueChannels);
-      const mux = taskPreference.muxDevice;
+      const selectorDevice = taskPreference.channelSelectorDevice;
       const valueNames = valueMetas.map((v) => v.name);
       deviceNames = [sensor.context.name, selector?.context.name].filter((n): n is string => !!n);
       // Ocupa los dispositivos (espera a un cambio de configuración en curso) hasta terminar
       release = await this.deviceActivity.beginMeasurement([sensor.context.id, ...(selector ? [selector.context.id] : [])]);
 
       this.logger.log(
-          `Experiment - Sensor: ${sensor.context.name} (${taskPreference.analyzerDevice.type}), selector: ${selector ? `${selector.context.name} (${selector.description.deviceType})` : 'sin selector'}, canales ${channelRange.min}-${channelRange.max}, valores [${valueNames.join(', ')}]`,
+          `Experiment - Sensor: ${sensor.context.name} (${taskPreference.sensorDevice.type}), selector: ${selector ? `${selector.context.name} (${selector.description.deviceType})` : 'sin selector'}, canales ${channelRange.min}-${channelRange.max}, valores [${valueNames.join(', ')}]`,
       );
 
       this.logger.log(
@@ -258,8 +267,8 @@ export class MeasurementsService {
 
           // 3b. Medir todos los rangos para este canal (getSensorData del equipo de medición)
           const points: MeasuredPoint[] = [];
-          for (const range of params.ranges) {
-            points.push(...await sensor.plugin.getSensorData(sensor.context, range));
+          for (const request of requestsFor(acquisition, params.ranges)) {
+            points.push(...await sensor.plugin.getSensorData(sensor.context, request));
           }
 
           this.logger.log(
@@ -297,13 +306,14 @@ export class MeasurementsService {
         }
       }
 
-      // 4. Fusionar canales por frecuencia (16 slots por sensorValue declarado)
+      // 4. Fusionar canales por x (16 slots por sensorValue declarado)
       const measurementData = buildMeasurementData(results, valueNames);
 
       this.logger.log(`Total points collected: ${measurementData.length}`);
 
-      const firstRange = params.ranges[0];
-      const lastRange = params.ranges[params.ranges.length - 1];
+      const firstRange = params.ranges[0] as SweepRange | undefined;
+      const lastRange = params.ranges[params.ranges.length - 1] as SweepRange | undefined;
+      const snapshot = snapshotOf(acquisition);
       const totalPoints = params.ranges.reduce((sum, r) => sum + r.points, 0);
 
       // 5. Clasificar con el Kronos Watcher y guardar medición en DB
@@ -317,14 +327,15 @@ export class MeasurementsService {
           scheduledJobId: params.scheduledJobId ?? null,
           executionIndex: params.executionIndex ?? null,
           presetName: taskPreference.name,
-          startFreq: firstRange.startFreq,
-          stopFreq: lastRange.stopFreq,
-          points: totalPoints,
-          sweepType: firstRange.sweepType,
-          analyzerName: taskPreference.analyzerDevice.name,
-          analyzerIp: taskPreference.analyzerDevice.ip ?? '',
-          muxName: mux?.name ?? null,
-          muxIp: mux ? (mux.ip ?? '') : null,
+          start: firstRange?.start ?? null,
+          stop: lastRange?.stop ?? null,
+          points: params.ranges.length ? totalPoints : null,
+          scale: firstRange?.scale ?? null,
+          acquisition: snapshot as unknown as Prisma.InputJsonValue,
+          sensorDeviceName: taskPreference.sensorDevice.name,
+          sensorDeviceIp: taskPreference.sensorDevice.ip ?? null,
+          channelSelectorName: selectorDevice?.name ?? null,
+          channelSelectorIp: selectorDevice?.ip ?? null,
           sensorValues: valueMetas as unknown as Prisma.InputJsonValue,
           data: measurementData as unknown as Prisma.InputJsonValue,
         },
@@ -356,6 +367,7 @@ export class MeasurementsService {
           measurementData.length,
           measurementData,
           valueMetas,
+          snapshot,
       );
 
       this.kronosGateway.emitMeasurementComplete(taskId, {
@@ -373,6 +385,7 @@ export class MeasurementsService {
         totalPoints: measurementData.length,
         data: measurementData,
         sensorValues: valueMetas,
+        acquisition: snapshot,
       };
 
     } catch (error) {

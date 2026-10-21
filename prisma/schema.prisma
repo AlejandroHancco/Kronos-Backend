@@ -26,8 +26,8 @@ model Device {
   ip                    String?            @db.VarChar(45)
   createdAt             DateTime?          @default(now()) @db.Timestamptz(6)
   project               Project            @relation(fields: [projectId], references: [uuid], onDelete: Cascade)
-  analyzerTaskPreferences TaskPreference[] @relation("analyzerDevice")
-  muxTaskPreferences      TaskPreference[] @relation("muxDevice")
+  sensorTaskPreferences   TaskPreference[] @relation("sensorDevice")
+  channelSelectorTaskPreferences TaskPreference[] @relation("channelSelectorDevice")
   status                  DeviceStatus       @default(offline)
   configuration           Json?
 
@@ -49,20 +49,23 @@ model Measurement {
 
   // Snapshot del preset usado
   presetName         String?           @db.VarChar(100)
-  startFreq          Decimal           @db.Decimal
-  stopFreq           Decimal           @db.Decimal
-  points             Int
-  sweepType          String            @db.VarChar(20)
+  // Copia del barrido (null en lecturas puntuales)
+  start              Decimal?          @db.Decimal
+  stop               Decimal?          @db.Decimal
+  points             Int?
+  scale              String?           @db.VarChar(20)
+  // { kind, variable? } (core/acquisition.ts AcquisitionSnapshot)
+  acquisition        Json
 
-  // Snapshot de Analyzer
-  analyzerName       String            @db.VarChar(150)
-  analyzerIp         String            @db.VarChar(45)
+  // Snapshot del sensor
+  sensorDeviceName   String            @db.VarChar(150)
+  sensorDeviceIp     String?           @db.VarChar(45)
 
-  // Snapshot de Mux
-  muxName            String?           @db.VarChar(150)
-  muxIp              String?           @db.VarChar(45)
+  // Snapshot del selector de canal
+  channelSelectorName String?          @db.VarChar(150)
+  channelSelectorIp  String?           @db.VarChar(45)
 
-  // [{ frequency, values: { <sensorValue>: number[16] } }]
+  // [{ x?, values: { <sensorValue>: number[16] } }]
   data               Json
   // [{ name, unit, label? }] declarados por el plugin
   sensorValues       Json?
@@ -163,13 +166,13 @@ model TaskPreference {
   id               Int       @id @default(autoincrement())
   taskId           Int       @unique
   name             String    @db.VarChar(100)
-  analyzerDeviceId String    @db.Uuid
-  muxDeviceId      String?   @db.Uuid
+  sensorDeviceId   String    @db.Uuid
+  channelSelectorDeviceId String? @db.Uuid
   createdAt        DateTime? @default(now()) @db.Timestamptz(6)
   updatedAt        DateTime? @updatedAt @db.Timestamptz(6)
 
-  analyzerDevice   Device                @relation("analyzerDevice", fields: [analyzerDeviceId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  muxDevice        Device?               @relation("muxDevice", fields: [muxDeviceId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  sensorDevice     Device                @relation("sensorDevice", fields: [sensorDeviceId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  channelSelectorDevice Device?          @relation("channelSelectorDevice", fields: [channelSelectorDeviceId], references: [id], onDelete: Restrict, onUpdate: NoAction)
   task             Task                  @relation(fields: [taskId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   ranges           TaskPreferenceRange[]
 
@@ -182,10 +185,10 @@ model TaskPreferenceRange {
   id               Int            @id @default(autoincrement())
   taskPreferenceId Int
   order            Int
-  startFreq        Decimal        @db.Decimal
-  stopFreq         Decimal        @db.Decimal
+  start            Decimal        @db.Decimal
+  stop             Decimal        @db.Decimal
   points           Int            @default(801)
-  sweepType        String         @default("LIN") @db.VarChar(20)
+  scale            String         @default("LIN") @db.VarChar(20)
 
   taskPreference   TaskPreference @relation(fields: [taskPreferenceId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   measurements     Measurement[]

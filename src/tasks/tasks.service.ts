@@ -6,6 +6,7 @@ import { ExperimentConfigService } from '../device-plugins/core/experiment-confi
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { MeasureDto } from './dto/measure.dto';
+import { parseAcquisitionSnapshot } from '../measurements/measurement-data';
 
 @Injectable()
 export class TasksService {
@@ -86,8 +87,8 @@ export class TasksService {
       where: { taskId: id },
       orderBy: { createdAt: 'desc' },
       include: {
-        analyzerDevice: true,
-        muxDevice: true,
+        sensorDevice: true,
+        channelSelectorDevice: true,
         ranges: {
           orderBy: { order: 'asc' },
         },
@@ -111,17 +112,19 @@ export class TasksService {
         id: true,
         takenAt: true,
         takenBy: true,
-        startFreq: true,
-        stopFreq: true,
-        analyzerName: true,
-        muxName: true,
+        start: true,
+        stop: true,
+        sensorDeviceName: true,
+        channelSelectorName: true,
+        acquisition: true,
       },
     });
 
     return measurements.map(m => ({
       ...m,
-      startFreq: Number(m.startFreq),
-      stopFreq: Number(m.stopFreq),
+      start: m.start === null ? null : Number(m.start),
+      stop: m.stop === null ? null : Number(m.stop),
+      acquisition: parseAcquisitionSnapshot(m.acquisition),
     }));
   }
 

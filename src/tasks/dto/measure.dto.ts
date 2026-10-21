@@ -1,31 +1,29 @@
-import { IsEnum, IsOptional, IsString, IsArray, Min, Max, IsNumber, ValidateNested } from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsString, IsArray, Min, Max, IsNumber, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { IsGreaterThan } from '../../common/validators/is-greater-than.decorator';
 
-export class FreqRangeDto {
+/** Un rango de barrido sobre la variable que declara el sensor (límites por dispositivo: B3). */
+export class SweepRangeDto {
   @IsNumber()
-  @Min(1)
-  startFreq: number;
+  start: number;
 
   @IsNumber()
-  @Min(1)
-  @IsGreaterThan('startFreq', { message: 'stopFreq debe ser mayor que startFreq' })
-  stopFreq: number;
+  @IsGreaterThan('start', { message: 'stop debe ser mayor que start' })
+  stop: number;
 
-  @IsNumber()
+  @IsInt()
   @Min(1)
-  @Max(801)
   points: number;
 
-  @IsEnum(['LOG', 'LIN'])
-  sweepType: 'LOG' | 'LIN';
+  @IsIn(['LIN', 'LOG'])
+  scale: 'LIN' | 'LOG';
 }
 
 export class MeasureDto {
   @IsArray()
   @ValidateNested({ each: true })
-  @Type(() => FreqRangeDto)
-  ranges: FreqRangeDto[];
+  @Type(() => SweepRangeDto)
+  ranges: SweepRangeDto[];
 
   @IsArray()
   @IsNumber({}, { each: true })

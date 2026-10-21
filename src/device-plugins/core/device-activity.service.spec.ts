@@ -3,7 +3,7 @@ import { DeviceActivityService } from './device-activity.service';
 const prisma = (running: string[] = []) => ({
   scheduledJob: { findMany: jest.fn(async () => (running.length ? [{ taskId: 1 }] : [])) },
   taskPreference: {
-    findMany: jest.fn(async () => (running.length ? [{ analyzerDeviceId: running[0], muxDeviceId: running[1] ?? null }] : [])),
+    findMany: jest.fn(async () => (running.length ? [{ sensorDeviceId: running[0], channelSelectorDeviceId: running[1] ?? null }] : [])),
   },
 });
 

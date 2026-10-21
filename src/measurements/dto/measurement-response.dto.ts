@@ -1,9 +1,13 @@
+import type { AcquisitionSnapshot } from '../../device-plugins/core/acquisition';
+
 export class MeasurementResponseDto {
   id: number;
   takenAt: Date;
   takenBy: string;
-  startFreq: number;
-  stopFreq: number;
-  analyzerName: string;
-  muxName: string | null;
+  /** Copia del barrido; null en lecturas puntuales. */
+  start: number | null;
+  stop: number | null;
+  sensorDeviceName: string;
+  channelSelectorName: string | null;
+  acquisition: AcquisitionSnapshot;
 }

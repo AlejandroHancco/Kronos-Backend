@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client';
 import type { Response } from 'express';
 import { PrismaService } from '../prisma/prisma.service';
 import { TeamScopeService } from '../common/team-scope.service';
-import { parseSensorValues, storedPointsOf } from '../measurements/measurement-data';
+import { parseAcquisitionSnapshot, parseSensorValues, storedPointsOf } from '../measurements/measurement-data';
 import { buildCsv, csvPreamble, rowsToCsvLines, valueColumnsFor, CsvChannel, CsvMeasurement } from './measurement-csv';
 import {
   fetchKeysetPage, PageCursor, PageIdRow, pageIdsQuery, streamMeasurementsCsv, valueColumnsQuery, writeChunk,
@@ -129,9 +129,9 @@ export class ReportsService {
           take: 1,
           select: {
             name: true,
-            analyzerDevice: { select: { name: true, ip: true } },
-            muxDevice: { select: { name: true, ip: true } },
-            ranges: { orderBy: { order: 'asc' }, select: { startFreq: true, stopFreq: true, points: true, sweepType: true } },
+            sensorDevice: { select: { name: true, ip: true } },
+            channelSelectorDevice: { select: { name: true, ip: true } },
+            ranges: { orderBy: { order: 'asc' }, select: { start: true, stop: true, points: true, scale: true } },
           },
         },
       },
@@ -142,7 +142,7 @@ export class ReportsService {
       where: { taskId, ...this.takenAtWhere(range) },
       orderBy: takenAtOrder,
       select: {
-        id: true, takenAt: true, takenByName: true, presetName: true, sweepType: true,
+        id: true, takenAt: true, takenByName: true, presetName: true, scale: true, acquisition: true,
         watcherStatus: true, watcherReason: true,
         measurementChannels: { select: channelSelect },
       },
@@ -154,14 +154,15 @@ export class ReportsService {
     // `data` con puntos del formato nuevo (los legados se ignoran hasta su migración).
     const recentIds = measurements.slice(-LATEST_LOOKBACK).map((m) => m.id).reverse();
     let latest: {
-      id: number; takenAt: Date | null; sweepType: string; data: Prisma.JsonValue; sensorValues: Prisma.JsonValue;
+      id: number; takenAt: Date | null; scale: string | null; data: Prisma.JsonValue; sensorValues: Prisma.JsonValue;
+      acquisition: Prisma.JsonValue;
       measurementChannels: RawChannel[];
     } | null = null;
     if (recentIds.length) {
       const candidates = await this.prisma.measurement.findMany({
         where: { id: { in: recentIds } },
         select: {
-          id: true, takenAt: true, sweepType: true, data: true, sensorValues: true,
+          id: true, takenAt: true, scale: true, data: true, sensorValues: true, acquisition: true,
           measurementChannels: { select: channelSelect },
         },
       });
@@ -182,24 +183,26 @@ export class ReportsService {
       preference: pref
         ? {
             name: pref.name,
-            analyzer: pref.analyzerDevice,
-            mux: pref.muxDevice,
+            analyzer: pref.sensorDevice,
+            mux: pref.channelSelectorDevice,
             ranges: pref.ranges.map((r) => ({
-              startFreq: Number(r.startFreq), stopFreq: Number(r.stopFreq), points: r.points, sweepType: r.sweepType,
+              start: Number(r.start), stop: Number(r.stop), points: r.points, scale: r.scale,
             })),
           }
         : null,
-      measurements: measurements.map(({ measurementChannels, ...m }) => ({
+      measurements: measurements.map(({ measurementChannels, acquisition, ...m }) => ({
         ...m,
+        acquisition: parseAcquisitionSnapshot(acquisition),
         channels: measurementChannels.map(toCsvChannel),
       })),
       latest: latest
         ? {
             id: latest.id,
             takenAt: latest.takenAt,
-            sweepType: latest.sweepType,
+            scale: latest.scale,
             data: storedPointsOf(latest.data),
             sensorValues: parseSensorValues(latest.sensorValues),
+            acquisition: parseAcquisitionSnapshot(latest.acquisition),
             channels: latest.measurementChannels.map(toCsvChannel),
           }
         : null,

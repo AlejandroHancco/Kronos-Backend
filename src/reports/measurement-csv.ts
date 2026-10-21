@@ -58,7 +58,7 @@ export interface CsvMeasurement {
 }
 
 /**
- * Formato largo: una fila por (frecuencia, canal medido). Solo canales con fila en
+ * Formato largo: una fila por (x, canal medido). Solo canales con fila en
  * measurement_channels. Cada columna de `cols` toma el valor del slot del canal si la medición
  * declaró ese (name, unit); si no, queda vacía. Puntos legados ({frequency, g, b}) se ignoran.
  */
@@ -77,7 +77,7 @@ export function measurementToRows(m: CsvMeasurement, cols: CsvValueColumn[]): un
         m.takenByName ?? '',
         m.presetName ?? '',
         m.watcherStatus ?? '',
-        point.frequency,
+        point.x ?? null,
         ch.channelNumber,
         ch.channelAlias ?? '',
         ...cols.map((c) => (declared.has(metaKey(c.name, c.unit)) ? point.values[c.name]?.[idx] ?? null : null)),
@@ -107,7 +107,7 @@ export function csvPreamble(metaLines: string[], cols: CsvValueColumn[]): string
   return '﻿' + lines.join('\r\n');
 }
 
-/** Líneas CSV (sin BOM ni encabezado) para una medición; una por (frecuencia, canal medido). */
+/** Líneas CSV (sin BOM ni encabezado) para una medición; una por (x, canal medido). */
 export function rowsToCsvLines(m: CsvMeasurement, cols: CsvValueColumn[]): string[] {
   return measurementToRows(m, cols).map(toCsvRow);
 }

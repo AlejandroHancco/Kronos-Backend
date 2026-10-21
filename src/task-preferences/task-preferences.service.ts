@@ -14,20 +14,20 @@ export interface TaskPreferenceResponse {
   ranges: {
     id: number;
     order: number;
-    startFreq: number;
-    stopFreq: number;
+    start: number;
+    stop: number;
     points: number;
-    sweepType: string;
+    scale: string;
   }[];
   createdAt: string;
   updatedAt: string;
-  analyzerDevice: {
+  sensorDevice: {
     id: string;
     name: string;
     type: string | null;
     ip: string | null;
   };
-  muxDevice: {
+  channelSelectorDevice: {
     id: string;
     name: string;
     type: string | null;
@@ -49,8 +49,8 @@ export interface TaskPreferenceWarning {
 export type TaskPreferenceSaveResponse = TaskPreferenceResponse & { warnings: TaskPreferenceWarning[] };
 
 type TaskPreferenceWithDevices = TaskPreference & {
-  analyzerDevice: Device;
-  muxDevice: Device | null;
+  sensorDevice: Device;
+  channelSelectorDevice: Device | null;
   ranges: any[];
 };
 
@@ -67,8 +67,8 @@ export class TaskPreferencesService {
     const preference = await this.prisma.taskPreference.findUnique({
       where: { taskId },
       include: {
-        analyzerDevice: true,
-        muxDevice: true,
+        sensorDevice: true,
+        channelSelectorDevice: true,
         ranges: {
           orderBy: { order: 'asc' },
         },
@@ -97,29 +97,29 @@ export class TaskPreferencesService {
 
     await this.experimentConfig.assertValidConfig(
       taskId,
-      dto.analyzerDeviceId,
-      dto.muxDeviceId ?? null,
+      dto.sensorDeviceId,
+      dto.channelSelectorDeviceId ?? null,
     );
 
     const preference = await this.prisma.taskPreference.create({
       data: {
         taskId,
         name: dto.name,
-        analyzerDeviceId: dto.analyzerDeviceId,
-        muxDeviceId: dto.muxDeviceId ?? null,
+        sensorDeviceId: dto.sensorDeviceId,
+        channelSelectorDeviceId: dto.channelSelectorDeviceId ?? null,
         ranges: {
           create: dto.ranges.map((r) => ({
             order: r.order,
-            startFreq: r.startFreq,
-            stopFreq: r.stopFreq,
+            start: r.start,
+            stop: r.stop,
             points: r.points,
-            sweepType: r.sweepType,
+            scale: r.scale,
           })),
         },
       },
       include: {
-        analyzerDevice: true,
-        muxDevice: true,
+        sensorDevice: true,
+        channelSelectorDevice: true,
         ranges: {
           orderBy: { order: 'asc' },
         },
@@ -136,15 +136,15 @@ export class TaskPreferencesService {
   ): Promise<TaskPreferenceSaveResponse> {
     await this.teamScope.assertTaskInTeam(userId, taskId);
 
-    if (dto.analyzerDeviceId !== undefined || dto.muxDeviceId !== undefined) {
+    if (dto.sensorDeviceId !== undefined || dto.channelSelectorDeviceId !== undefined) {
       const current = await this.prisma.taskPreference.findUnique({ where: { taskId } });
       if (!current) {
         throw new NotFoundException('TaskPreference no encontrada');
       }
-      const analyzerDeviceId = dto.analyzerDeviceId ?? current.analyzerDeviceId;
-      const muxDeviceId =
-        dto.muxDeviceId !== undefined ? dto.muxDeviceId : current.muxDeviceId;
-      await this.experimentConfig.assertValidConfig(taskId, analyzerDeviceId, muxDeviceId ?? null);
+      const sensorDeviceId = dto.sensorDeviceId ?? current.sensorDeviceId;
+      const channelSelectorDeviceId =
+        dto.channelSelectorDeviceId !== undefined ? dto.channelSelectorDeviceId : current.channelSelectorDeviceId;
+      await this.experimentConfig.assertValidConfig(taskId, sensorDeviceId, channelSelectorDeviceId ?? null);
     }
 
     try {
@@ -158,17 +158,17 @@ export class TaskPreferencesService {
                 deleteMany: {},
                 create: ranges.map((r) => ({
                   order: r.order,
-                  startFreq: r.startFreq,
-                  stopFreq: r.stopFreq,
+                  start: r.start,
+                  stop: r.stop,
                   points: r.points,
-                  sweepType: r.sweepType,
+                  scale: r.scale,
                 })),
               }
             : undefined,
         },
         include: {
-          analyzerDevice: true,
-          muxDevice: true,
+          sensorDevice: true,
+          channelSelectorDevice: true,
           ranges: {
             orderBy: { order: 'asc' },
           },
@@ -197,8 +197,8 @@ export class TaskPreferencesService {
       const preference = await this.prisma.taskPreference.delete({
         where: { taskId },
         include: {
-          analyzerDevice: true,
-          muxDevice: true,
+          sensorDevice: true,
+          channelSelectorDevice: true,
           ranges: true,
         },
       });
@@ -248,25 +248,25 @@ export class TaskPreferencesService {
       ranges: preference.ranges.map((r) => ({
         id: r.id,
         order: r.order,
-        startFreq: Number(r.startFreq),
-        stopFreq: Number(r.stopFreq),
+        start: Number(r.start),
+        stop: Number(r.stop),
         points: r.points,
-        sweepType: r.sweepType,
+        scale: r.scale,
       })),
       createdAt: preference.createdAt?.toISOString() ?? '',
       updatedAt: preference.updatedAt?.toISOString() ?? '',
-      analyzerDevice: {
-        id: preference.analyzerDevice.id,
-        name: preference.analyzerDevice.name,
-        type: preference.analyzerDevice.type,
-        ip: preference.analyzerDevice.ip,
+      sensorDevice: {
+        id: preference.sensorDevice.id,
+        name: preference.sensorDevice.name,
+        type: preference.sensorDevice.type,
+        ip: preference.sensorDevice.ip,
       },
-      muxDevice: preference.muxDevice
+      channelSelectorDevice: preference.channelSelectorDevice
         ? {
-            id: preference.muxDevice.id,
-            name: preference.muxDevice.name,
-            type: preference.muxDevice.type,
-            ip: preference.muxDevice.ip,
+            id: preference.channelSelectorDevice.id,
+            name: preference.channelSelectorDevice.name,
+            type: preference.channelSelectorDevice.type,
+            ip: preference.channelSelectorDevice.ip,
           }
         : null,
     };

@@ -27,7 +27,7 @@
  * Modos de acceso: solo se implementa `pull`; `push` y `stream` se declaran pero no se usan.
  */
 
-import type { AcquisitionMetadata } from './acquisition';
+import type { AcquisitionMetadata, AcquisitionRequest } from './acquisition';
 
 export type AccessModeType = 'pull' | 'push' | 'stream';
 export type ValueType = 'double' | 'integer' | 'string' | 'boolean';
@@ -148,9 +148,9 @@ export interface DeviceContext {
   configuration: ConfigurationValues;
 }
 
-/** Un punto medido: una frecuencia con sus valores de sensor por nombre (ej. {g, b}). */
+/** Un punto medido: valor de la variable del barrido (`x`, ausente en lecturas puntuales) y los sensorValues por nombre. */
 export interface MeasuredPoint {
-  frequency: number;
+  x?: number;
   values: Record<string, number>;
 }
 
@@ -161,14 +161,6 @@ export type DeviceRole = 'sensor' | 'channel-selector';
 export interface ConnectionTarget {
   ip: string | null;
   port?: number;
-}
-
-/** Un barrido de frecuencia que el sensor ejecuta. */
-export interface SweepParams {
-  startFreq: number;
-  stopFreq: number;
-  points: number;
-  sweepType: string;
 }
 
 export interface DevicePlugin {
@@ -189,7 +181,7 @@ export interface DevicePlugin {
 
 /** Capacidad "getSensorData" (Tablas 14/15): devuelve los sensorValues declarados por nombre. */
 export interface SensorPlugin extends DevicePlugin {
-  getSensorData(device: DeviceContext, sweep: SweepParams): Promise<MeasuredPoint[]>;
+  getSensorData(device: DeviceContext, request: AcquisitionRequest): Promise<MeasuredPoint[]>;
 }
 
 /** Capacidad "setActuatorData" (Tabla 19). */

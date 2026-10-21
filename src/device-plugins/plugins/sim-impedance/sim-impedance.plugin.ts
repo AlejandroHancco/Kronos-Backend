@@ -8,8 +8,8 @@ import type {
   DeviceServiceDescription,
   MeasuredPoint,
   SensorPlugin,
-  SweepParams,
 } from '../../core/device-plugin.interface';
+import { sweepXs, type AcquisitionRequest } from '../../core/acquisition';
 
 /** Validada al cargar el módulo: una descripción inválida impide el arranque. */
 const DESCRIPTION = parseServiceDescription(raw, 'sim-impedance');
@@ -23,14 +23,6 @@ export function randlesImpedance(f: number, p: RandlesParams = CONCRETE_LIKE): n
   const wRC = 2 * Math.PI * f * p.rp * p.c;
   const denom = 1 + wRC * wRC;
   return Math.hypot(p.rs + p.rp / denom, (p.rp * wRC) / denom);
-}
-
-export function sweepFrequencies(start: number, stop: number, points: number, sweepType: string): number[] {
-  if (points <= 1) return [start];
-  return Array.from({ length: points }, (_, i) => {
-    const t = i / (points - 1);
-    return sweepType === 'LOG' && start > 0 ? start * (stop / start) ** t : start + (stop - start) * t;
-  });
 }
 
 /** Parámetros del modelo desde la configuración efectiva del dispositivo (`c` se configura en nF). */
@@ -57,12 +49,13 @@ export class SimulatedImpedancePlugin implements SensorPlugin {
     return true;
   }
 
-  async getSensorData(device: DeviceContext, sweep: SweepParams): Promise<MeasuredPoint[]> {
+  async getSensorData(device: DeviceContext, request: AcquisitionRequest): Promise<MeasuredPoint[]> {
+    if (request.kind !== 'sweep') throw new Error('El simulador de impedancia solo hace barridos');
     const params = randlesParamsOf(device.configuration);
     const noisePercent = Number(device.configuration.noisePercent ?? 0);
-    return sweepFrequencies(sweep.startFreq, sweep.stopFreq, sweep.points, sweep.sweepType).map((frequency) => ({
-      frequency,
-      values: { z: randlesImpedance(frequency, params) * (1 + (2 * this.randomUnit() * noisePercent) / 100) },
+    return sweepXs(request.start, request.stop, request.points, request.scale).map((x) => ({
+      x,
+      values: { z: randlesImpedance(x, params) * (1 + (2 * this.randomUnit() * noisePercent) / 100) },
     }));
   }
 }

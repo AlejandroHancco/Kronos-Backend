@@ -9,8 +9,8 @@ import type {
   DeviceServiceDescription,
   MeasuredPoint,
   SensorPlugin,
-  SweepParams,
 } from '../../core/device-plugin.interface';
+import type { AcquisitionRequest } from '../../core/acquisition';
 import { HIOKI_SCPI_PORT, MEASURE_QUERY, parseGbResponse, sweepSetupCommands } from './scpi';
 
 /** Validada al cargar el módulo: una descripción inválida impide el arranque. */
@@ -60,7 +60,9 @@ export class HiokiIm3570Plugin implements SensorPlugin {
   }
 
   /** "getSensorData": envía el setup del barrido, consulta :MEASure? y lee la respuesta hasta \n. */
-  getSensorData(device: DeviceContext, sweep: SweepParams): Promise<MeasuredPoint[]> {
+  getSensorData(device: DeviceContext, request: AcquisitionRequest): Promise<MeasuredPoint[]> {
+    if (request.kind !== 'sweep') return Promise.reject(new Error('El Hioki IM3570 solo hace barridos'));
+    const sweep = request;
     // Sin IP, net.createConnection usaría localhost: fallar antes con un mensaje claro.
     if (!device.ip) return Promise.reject(new Error(`El equipo "${device.name}" no tiene IP configurada`));
     const host = device.ip;

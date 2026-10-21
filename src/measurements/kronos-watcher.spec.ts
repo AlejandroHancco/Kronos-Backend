@@ -1,6 +1,6 @@
 import { classifyMeasurement } from './kronos-watcher';
 
-const pt = (f: number, values: Record<string, number[]>) => ({ frequency: f, values });
+const pt = (f: number, values: Record<string, number[]>) => ({ x: f, values });
 const slots = (first: number) => [first, ...Array(15).fill(0)];
 
 describe('classifyMeasurement', () => {

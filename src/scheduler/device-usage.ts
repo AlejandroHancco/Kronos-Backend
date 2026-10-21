@@ -1,10 +1,10 @@
 import type { PrismaService } from '../prisma/prisma.service';
 
 /** Dispositivos que ocupa una configuración de tarea; el MUX es opcional (null = sin MUX). */
-export interface PrefDevices { analyzerDeviceId: string; muxDeviceId: string | null }
+export interface PrefDevices { sensorDeviceId: string; channelSelectorDeviceId: string | null }
 
 export function deviceIdsOf(p: PrefDevices): string[] {
-  return p.muxDeviceId ? [p.analyzerDeviceId, p.muxDeviceId] : [p.analyzerDeviceId];
+  return p.channelSelectorDeviceId ? [p.sensorDeviceId, p.channelSelectorDeviceId] : [p.sensorDeviceId];
 }
 
 /** true si dos configuraciones comparten algún dispositivo físico (nunca por coincidir en "sin MUX"). */
@@ -25,7 +25,7 @@ export async function runningJobDeviceIds(prisma: Pick<PrismaService, 'scheduled
 
   const preferences = await prisma.taskPreference.findMany({
     where: { taskId: { in: runningJobs.map((j) => j.taskId) } },
-    select: { analyzerDeviceId: true, muxDeviceId: true },
+    select: { sensorDeviceId: true, channelSelectorDeviceId: true },
   });
 
   for (const pref of preferences) {

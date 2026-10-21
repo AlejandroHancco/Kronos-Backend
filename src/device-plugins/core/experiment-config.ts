@@ -30,7 +30,7 @@ export function experimentConfigError(a: {
     if (a.selectorRole !== 'channel-selector') {
       return `El dispositivo "${selector.name}" no es un selector de canal registrado (${typeLabel(selector.type)})`;
     }
-    if (selector.projectId !== a.taskProjectId) return 'El MUX no pertenece al proyecto de la tarea';
+    if (selector.projectId !== a.taskProjectId) return 'El selector de canal no pertenece al proyecto de la tarea';
   }
   return null;
 }
@@ -59,7 +59,7 @@ export function invalidChannels(channels: number[], r: ChannelRange): number[] {
 }
 
 export function channelRangeMessage(r: ChannelRange, bad: number[]): string {
-  if (r.min === 1 && r.max === 1) return 'Sin MUX solo se mide el canal 1';
+  if (r.min === 1 && r.max === 1) return 'Sin selector de canal solo se mide el canal 1';
   return `Canales fuera de rango para esta configuración (permitidos: ${r.min}–${r.max}): ${bad.join(', ')}`;
 }
 

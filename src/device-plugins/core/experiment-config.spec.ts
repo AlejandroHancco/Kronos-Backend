@@ -33,7 +33,7 @@ describe('experimentConfigError', () => {
 
   it('selector de otro proyecto', () => {
     expect(experimentConfigError({ ...sensorOf('hioki-im3570'), selector: dev('kronos-mux-16', 'Q'), selectorRole: 'channel-selector' }))
-      .toMatch(/MUX no pertenece/);
+      .toMatch(/El selector de canal no pertenece al proyecto de la tarea/);
   });
 
   it('equipo de medición de otro proyecto o que no es sensor', () => {
@@ -68,7 +68,7 @@ describe('channelRangeOf / channelRangeFor / invalidChannels', () => {
 
   it('detecta canales fuera de rango con mensaje claro', () => {
     expect(invalidChannels([1, 2], { min: 1, max: 1 })).toEqual([2]);
-    expect(channelRangeMessage({ min: 1, max: 1 }, [2])).toBe('Sin MUX solo se mide el canal 1');
+    expect(channelRangeMessage({ min: 1, max: 1 }, [2])).toBe('Sin selector de canal solo se mide el canal 1');
     expect(channelRangeMessage({ min: 1, max: 16 }, [17])).toBe('Canales fuera de rango para esta configuración (permitidos: 1–16): 17');
   });
 });

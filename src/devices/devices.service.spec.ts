@@ -99,7 +99,7 @@ describe('DevicesService (tipos por plugin)', () => {
       await expect(service.updateInProject('p1', 'd1', { type: 'sim-impedance' }, 'u1'))
         .rejects.toThrow(/en uso en configuraciones de tareas/);
       expect(prisma.taskPreference.count).toHaveBeenCalledWith({
-        where: { OR: [{ analyzerDeviceId: 'd1' }, { muxDeviceId: 'd1' }] },
+        where: { OR: [{ sensorDeviceId: 'd1' }, { channelSelectorDeviceId: 'd1' }] },
       });
       expect(prisma.device.update).not.toHaveBeenCalled();
     });

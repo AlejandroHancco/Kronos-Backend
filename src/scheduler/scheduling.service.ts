@@ -2,7 +2,8 @@ import { ConflictException, Injectable, Logger, Optional } from '@nestjs/common'
 import { InjectQueue } from '@nestjs/bull';
 import type { Queue } from 'bull';
 import { PrismaService } from '../prisma/prisma.service';
-import { MeasurementsService, MeasurementRange } from '../measurements/measurements.service';
+import { MeasurementsService } from '../measurements/measurements.service';
+import type { SweepRange } from '../device-plugins/core/acquisition';
 import { KronosGateway } from '../gateway/kronos.gateway';
 import { MEASUREMENTS_QUEUE } from '../queue/queue.constants';
 import { PrefDevices, sharesDevice } from './device-usage';
@@ -12,7 +13,7 @@ import { ExperimentConfigService } from '../device-plugins/core/experiment-confi
 export interface MeasurementJobData {
   taskId: number;
   userId: string;
-  ranges: MeasurementRange[];
+  ranges: SweepRange[];
   selectedChannels: number[];
   jobId: string;
   /** Duración estimada (segundos) — usada para calcular el backlog de la cola */
@@ -181,7 +182,7 @@ export class MeasurementSchedulingService {
     taskId: number,
     userId: string,
     params: {
-      ranges: MeasurementRange[];
+      ranges: SweepRange[];
       selectedChannels: number[];
       jobId?: string;
     },
@@ -264,7 +265,7 @@ export class MeasurementSchedulingService {
     const myPreference = await this.prisma.taskPreference.findFirst({
       where: { taskId },
       orderBy: { createdAt: 'desc' },
-      select: { analyzerDeviceId: true, muxDeviceId: true },
+      select: { sensorDeviceId: true, channelSelectorDeviceId: true },
     });
     if (!myPreference) return null; // sin preferencia: measureTask fallará con su propio error
 
@@ -281,7 +282,7 @@ export class MeasurementSchedulingService {
     const preferences = await this.prisma.taskPreference.findMany({
       where: { taskId: { in: [...new Set(pendingJobs.map((j) => j.taskId))] } },
       orderBy: { createdAt: 'desc' },
-      select: { taskId: true, analyzerDeviceId: true, muxDeviceId: true },
+      select: { taskId: true, sensorDeviceId: true, channelSelectorDeviceId: true },
     });
     // findMany devuelve todas; nos quedamos con la más reciente por tarea
     const prefByTask = new Map<number, PrefDevices>();
