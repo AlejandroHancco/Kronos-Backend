@@ -1,0 +1,29 @@
+{
+  "deviceType": "sim-spectrum",
+  "fullName": "Analizador de espectro simulado",
+  "shortName": "Espectro (simulado)",
+  "manufacturer": "Kronos (simulación)",
+  "description": "SIMULADO: piso de ruido cercano a -90 dBm con tres picos; barrido lineal, no requiere hardware",
+  "simulated": true,
+  "connection": { "requiresIp": false },
+  "sensors": [
+    {
+      "sensorId": "sim-spectrum-trace",
+      "fullName": "Espectro simulado",
+      "description": "Amplitud (dBm) por frecuencia (simulado)",
+      "protocol": "simulated",
+      "produces": "application/json",
+      "sensorValues": [ { "name": "amplitude", "unit": "dBm", "type": "double", "label": "Amplitud" } ],
+      "accessMode": { "accessModeType": "pull" },
+      "acquisition": {
+        "kind": "sweep",
+        "variable": { "name": "frequency", "unit": "Hz", "label": "Frecuencia", "rangeMinimum": 9000, "rangeMaximum": 3000000000 },
+        "points": { "minimum": 101, "maximum": 801 },
+        "scales": ["LIN"],
+        "secondsPerPoint": 0.001
+      }
+    }
+  ],
+  "actuators": [],
+  "configuration": []
+}

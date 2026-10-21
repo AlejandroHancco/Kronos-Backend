@@ -1,0 +1,40 @@
+{
+  "deviceType": "agilent-e4402b",
+  "fullName": "Agilent E4402B ESA-E Series Spectrum Analyzer",
+  "shortName": "Agilent E4402B",
+  "manufacturer": "Agilent (Keysight)",
+  "description": "Analizador de espectro Agilent E4402B (9 kHz – 3 GHz): amplitud en dBm por frecuencia, SCPI sobre GPIB a través de un adaptador de red (Prologix o AR488) o de un servidor serie",
+  "simulated": false,
+  "connection": { "requiresIp": true, "defaultPort": 1234 },
+  "sensors": [
+    {
+      "sensorId": "agilent-e4402b-spectrum",
+      "fullName": "Agilent E4402B — traza 1",
+      "description": "Amplitud (dBm) por frecuencia, barrido lineal",
+      "protocol": "tcp",
+      "produces": "text/csv",
+      "sensorValues": [
+        { "name": "amplitude", "unit": "dBm", "type": "double", "label": "Amplitud" }
+      ],
+      "accessMode": { "accessModeType": "pull" },
+      "acquisition": {
+        "kind": "sweep",
+        "variable": { "name": "frequency", "unit": "Hz", "label": "Frecuencia", "rangeMinimum": 9000, "rangeMaximum": 3000000000 },
+        "points": { "minimum": 401, "maximum": 401 },
+        "scales": ["LIN"],
+        "secondsPerPoint": 0.005
+      }
+    }
+  ],
+  "actuators": [],
+  "configuration": [
+    { "name": "transport", "label": "Conexión", "description": "prologix: adaptador GPIB-Ethernet (Prologix o AR488); raw: SCPI directo (servidor serie-Ethernet)", "type": "string", "unit": "", "allowedValues": ["prologix", "raw"], "default": "prologix", "access": "read-write", "storage": "persisted" },
+    { "name": "gpibAddress", "label": "Dirección GPIB", "description": "Solo con adaptador GPIB; la de fábrica del E4402B es 18", "type": "integer", "unit": "", "rangeMinimum": 0, "rangeMaximum": 30, "rangeStep": 1, "default": 18, "access": "read-write", "storage": "persisted" },
+    { "name": "resolutionBandwidth", "label": "Ancho de banda de resolución (RBW)", "description": "AUTO o un valor en Hz entre 1000 y 5000000", "type": "string", "unit": "Hz", "default": "AUTO", "access": "read-write", "storage": "persisted" },
+    { "name": "referenceLevel", "label": "Nivel de referencia", "type": "double", "unit": "dBm", "rangeMinimum": -150, "rangeMaximum": 30, "default": 0, "access": "read-write", "storage": "persisted" },
+    { "name": "defaultStartFreq", "label": "Frecuencia inicial por defecto", "description": "Valor sugerido al crear tareas; no afecta barridos en curso", "type": "double", "unit": "Hz", "rangeMinimum": 9000, "rangeMaximum": 3000000000, "default": 9000, "access": "read-write", "storage": "persisted" },
+    { "name": "defaultStopFreq", "label": "Frecuencia final por defecto", "description": "Valor sugerido al crear tareas; no afecta barridos en curso", "type": "double", "unit": "Hz", "rangeMinimum": 9000, "rangeMaximum": 3000000000, "default": 3000000000, "access": "read-write", "storage": "persisted" },
+    { "name": "defaultPoints", "label": "Puntos por defecto", "type": "integer", "unit": "", "rangeMinimum": 401, "rangeMaximum": 401, "rangeStep": 1, "default": 401, "access": "read-only", "storage": "fixed" },
+    { "name": "defaultSweepType", "label": "Tipo de barrido por defecto", "type": "string", "unit": "", "allowedValues": ["LIN"], "default": "LIN", "access": "read-only", "storage": "fixed" }
+  ]
+}

@@ -8,5 +8,5 @@ it('DevicePluginsModule registra por DI todos los plugins de plugins/index.ts', 
     .overrideProvider(PrismaService).useValue({})
     .compile();
   const types = mod.get(DevicePluginRegistry).catalog().map((e) => e.deviceType).sort();
-  expect(types).toEqual(['hioki-im3570', 'kronos-mux-16', 'sim-impedance', 'sim-temperature']);
+  expect(types).toEqual(['agilent-e4402b', 'hioki-im3570', 'kronos-mux-16', 'sim-impedance', 'sim-spectrum', 'sim-temperature']);
 });
