@@ -15,10 +15,13 @@ function setup(resolved?: any) {
     notifyTeamMeasurementSuccess: jest.fn(), notifyTeamMeasurementWarning: jest.fn(), notifyTeamMeasurementFailed: jest.fn(),
   };
   const experimentConfig = { assertChannels: jest.fn(async () => resolved) };
+  const release = jest.fn();
+  const deviceActivity = { beginMeasurement: jest.fn(async () => release) };
   const service = new MeasurementsService(
     prisma as any, teamScope as any, gateway as any, kronos as any, notifications as any, experimentConfig as any,
+    deviceActivity as any,
   );
-  return { service, prisma, notifications };
+  return { service, prisma, notifications, deviceActivity, release };
 }
 
 const base = {
@@ -99,5 +102,23 @@ describe('MeasurementsService.measureTask (sensor + selector de canal)', () => {
     expect(calls).toEqual(['get:1', 'get:3']);
     expect(sensorPlugin.getSensorData).toHaveBeenCalledTimes(2);
     expect(prisma.measurement.create.mock.calls[0][0].data).toMatchObject({ muxName: null, muxIp: null });
+  });
+
+  it('marca sensor y selector como ocupados durante la medición y los libera al terminar', async () => {
+    const { resolved } = resolvedWith([], true);
+    const { service, deviceActivity, release } = setup(resolved);
+    await service.measureTask(1, 'u1', { ranges, selectedChannels: [1] });
+    expect(deviceActivity.beginMeasurement).toHaveBeenCalledWith(['s1', 'm1']);
+    expect(release).toHaveBeenCalledTimes(1);
+  });
+
+  it('libera los dispositivos aunque getSensorData o el guardado fallen', async () => {
+    const { resolved, sensorPlugin } = resolvedWith([], false);
+    sensorPlugin.getSensorData.mockRejectedValue(new Error('timeout'));
+    const { service, prisma, deviceActivity, release } = setup(resolved);
+    prisma.measurement.create.mockRejectedValue(new Error('db'));
+    await expect(service.measureTask(1, 'u1', { ranges, selectedChannels: [1] })).rejects.toThrow('db');
+    expect(deviceActivity.beginMeasurement).toHaveBeenCalledWith(['s1']);
+    expect(release).toHaveBeenCalledTimes(1);
   });
 });

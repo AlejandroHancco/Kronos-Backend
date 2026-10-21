@@ -11,7 +11,7 @@ import {
   MeasurementJobData,
   PRIORITY_SCHEDULED,
 } from './scheduling.service';
-import { deviceIdsOf } from './device-usage';
+import { deviceIdsOf, runningJobDeviceIds } from './device-usage';
 
 /**
  * Cron que despacha los ScheduledJobs pendientes.
@@ -71,24 +71,8 @@ export class SchedulerService {
   }
 
   /** IDs de devices (analyzer + mux) usados por jobs con status 'running' */
-  private async getBusyDeviceIds(): Promise<Set<string>> {
-    const runningJobs = await this.prisma.scheduledJob.findMany({
-      where: { status: 'running' },
-      select: { taskId: true },
-    });
-
-    const busy = new Set<string>();
-    if (runningJobs.length === 0) return busy;
-
-    const preferences = await this.prisma.taskPreference.findMany({
-      where: { taskId: { in: runningJobs.map((j) => j.taskId) } },
-      select: { analyzerDeviceId: true, muxDeviceId: true },
-    });
-
-    for (const pref of preferences) {
-      deviceIdsOf(pref).forEach((id) => busy.add(id));
-    }
-    return busy;
+  private getBusyDeviceIds(): Promise<Set<string>> {
+    return runningJobDeviceIds(this.prisma);
   }
 
   private async dispatchJob(

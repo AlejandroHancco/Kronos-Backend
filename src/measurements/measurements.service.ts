@@ -7,6 +7,7 @@ import { KronosGateway } from '../gateway/kronos.gateway';
 import { NotificationsService } from '../notifications/notifications.service';
 import { classifyMeasurement, MeasurementClassification } from './kronos-watcher';
 import { ExperimentConfigService } from '../device-plugins/core/experiment-config.service';
+import { DeviceActivityService } from '../device-plugins/core/device-activity.service';
 import type { MeasuredPoint } from '../device-plugins/core/device-plugin.interface';
 import { CreateMeasurementDto } from './dto/create-measurement.dto';
 import { buildMeasurementData, ChannelResult, parseSensorValues, postedMeasurementError, storedPointsOf } from './measurement-data';
@@ -29,6 +30,7 @@ export class MeasurementsService {
       private kronosGateway: KronosGateway,
       private notificationsService: NotificationsService,
       private experimentConfig: ExperimentConfigService,
+      private deviceActivity: DeviceActivityService,
   ) {}
 
   /** Notifica al equipo del resultado de una medición (según clasificación del Kronos Watcher), sin romper el flujo si falla. */
@@ -188,6 +190,7 @@ export class MeasurementsService {
   ) {
     const jobId = params.jobId || `${taskId}-${Date.now()}`;
     let deviceNames: string[] = [];
+    let release: (() => void) | undefined;
 
     try {
       this.logger.log(`Starting measurement - Task: ${taskId}, JobId: ${jobId}, Ranges: ${params.ranges.length}`);
@@ -216,6 +219,8 @@ export class MeasurementsService {
       const mux = taskPreference.muxDevice;
       const valueNames = valueMetas.map((v) => v.name);
       deviceNames = [sensor.context.name, selector?.context.name].filter((n): n is string => !!n);
+      // Ocupa los dispositivos (espera a un cambio de configuración en curso) hasta terminar
+      release = await this.deviceActivity.beginMeasurement([sensor.context.id, ...(selector ? [selector.context.id] : [])]);
 
       this.logger.log(
           `Experiment - Sensor: ${sensor.context.name} (${taskPreference.analyzerDevice.type}), selector: ${selector ? `${selector.context.name} (${mux?.type})` : 'sin selector'}, canales ${channelRange.min}-${channelRange.max}, valores [${valueNames.join(', ')}]`,
@@ -385,6 +390,8 @@ export class MeasurementsService {
       });
 
       throw error;
+    } finally {
+      release?.();
     }
   }
 
