@@ -1,4 +1,5 @@
-import { Controller, Get, Inject } from '@nestjs/common';
+import { Controller, Get, HttpStatus, Inject, Res } from '@nestjs/common';
+import type { Response } from 'express';
 import Redis from 'ioredis';
 import { PrismaService } from '@app/database';
 import { REDIS_CLIENT } from '@app/redis';
@@ -6,6 +7,9 @@ import { REDIS_CLIENT } from '@app/redis';
 /**
  * Endpoint público de health check (sin guards).
  * GET /health
+ *
+ * El cuerpo es siempre el mismo; responde 503 si la base de datos o Redis
+ * están en error para que el HEALTHCHECK del contenedor falle.
  */
 @Controller('health')
 export class HealthController {
@@ -15,14 +19,18 @@ export class HealthController {
   ) {}
 
   @Get()
-  async check() {
+  async check(@Res({ passthrough: true }) res: Response) {
+    const services = {
+      database: await this.checkDatabase(),
+      redis: await this.checkRedis(),
+    };
+    if (services.database === 'error' || services.redis === 'error') {
+      res.status(HttpStatus.SERVICE_UNAVAILABLE);
+    }
     return {
       status: 'ok',
       timestamp: new Date().toISOString(),
-      services: {
-        database: await this.checkDatabase(),
-        redis: await this.checkRedis(),
-      },
+      services,
     };
   }
 
