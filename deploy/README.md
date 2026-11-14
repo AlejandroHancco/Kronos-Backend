@@ -30,16 +30,24 @@ Postgres and Redis are published only on `PRIVATE_IP` of vm-data.
 
 | VM | Variable | Notes |
 |----|----------|-------|
-| data | `PRIVATE_IP`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `REDIS_PASSWORD` | |
+| data | `PRIVATE_IP`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `REDIS_PASSWORD` | URL-safe passwords recommended (see below) |
 | worker | `DATABASE_URL` | `postgresql://USER:PASS@<data-private-ip>:5432/DB` |
 | worker | `REDIS_URL` | `redis://:PASSWORD@<data-private-ip>:6379` (password required) |
-| worker | `HEALTH_PORT` (3001), `DEVICE_LOCK_WAIT_MS` (900000), `DEVICE_TEST_TIMEOUT_MS` (5000), `SCHEDULER_MAX_BACKLOG_SECONDS` (900) | |
+| worker | `HEALTH_PORT` (3001), `DEVICE_LOCK_WAIT_MS` (900000) | |
 | app | `DATABASE_URL`, `REDIS_URL` | same formats as worker |
-| app | `PORT` (3000), `FRONTEND_URL`, `JWT_SECRET`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_JWT_SECRET`, `SCHEDULER_MAX_BACKLOG_SECONDS`, `DEVICE_TEST_TIMEOUT_MS` | |
+| app | `PORT` (3000), `FRONTEND_URL`, `JWT_SECRET`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_JWT_SECRET`, `SCHEDULER_MAX_BACKLOG_SECONDS` (900), `DEVICE_TEST_TIMEOUT_MS` (5000) | api-only |
 | app | `APP_DOMAIN`, `API_DOMAIN` | Caddy |
 | app | `VITE_API_URL`, `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_PUBLIC_URL` | frontend build args (baked at build time; rebuild to change) |
 
 `REDIS_URL` is required by both apps; they refuse to boot without it.
+
+**Passwords in URLs.** `POSTGRES_PASSWORD` / `REDIS_PASSWORD` end up inside `DATABASE_URL` /
+`REDIS_URL`. If they contain `@ : / # ? % &` or similar, they must be percent-encoded there
+(e.g. `p@ss` -> `p%40ss`), or the URL is parsed wrongly. Simplest: generate URL-safe passwords
+with `openssl rand -hex 24`.
+
+**Redeploys.** Compose gives the worker `stop_grace_period: 2m` and the api 30s, so an active
+measurement / in-flight request can finish on SIGTERM before the container is killed.
 
 ## Scaling to N API replicas
 

@@ -9,3 +9,5 @@ services:
     env_file: .env
     network_mode: host
     restart: always
+    # Let an active measurement finish on redeploy before SIGKILL.
+    stop_grace_period: 2m
