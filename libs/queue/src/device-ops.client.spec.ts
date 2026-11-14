@@ -116,6 +116,20 @@ describe('DeviceOpsClient.request', () => {
     expect(listenerCount()).toBe(0);
   });
 
+  it('bounds queue.add by the same timeout (Redis hung) → DeviceOpTimeoutError; a late job is removed', async () => {
+    let resolveAdd!: (j: FakeJob) => void;
+    queue.add.mockReturnValue(new Promise<FakeJob>((r) => (resolveAdd = r)));
+    const started = Date.now();
+    await expect(client.request('test-connection', { type: 'x', ip: '1', port: 1 }, 30)).rejects.toBeInstanceOf(
+      DeviceOpTimeoutError,
+    );
+    expect(Date.now() - started).toBeLessThan(1000);
+    expect(listenerCount()).toBe(0);
+    resolveAdd(job);
+    await new Promise((r) => setTimeout(r, 5));
+    expect(job.remove).toHaveBeenCalled();
+  });
+
   it('does not leave a pending timer after success', async () => {
     job = makeJob('completed', { returnvalue: true });
     queue.add.mockResolvedValue(job);

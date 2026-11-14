@@ -35,19 +35,40 @@ export class DeviceOpsClient {
   constructor(@InjectQueue(DEVICE_OPS_QUEUE) private readonly queue: Queue<DeviceOpData>) {}
 
   async request<T>(name: DeviceOpName, data: DeviceOpData, timeoutMs: number): Promise<T> {
+    const deadline = Date.now() + timeoutMs;
+    const adding = this.queue.add(name, data, {
+      attempts: 1,
+      // Se conserva el resultado unos segundos para poder leerlo por estado
+      // si el evento global llega antes de suscribirse (o se pierde).
+      removeOnComplete: { age: 60 },
+      removeOnFail: { age: 60 },
+    });
     let job: Job<DeviceOpData>;
+    let addTimer: NodeJS.Timeout | undefined;
+    let timedOut = false;
     try {
-      job = await this.queue.add(name, data, {
-        attempts: 1,
-        // Se conserva el resultado unos segundos para poder leerlo por estado
-        // si el evento global llega antes de suscribirse (o se pierde).
-        removeOnComplete: { age: 60 },
-        removeOnFail: { age: 60 },
-      });
+      // queue.add no tiene límite propio (Redis colgado/reconectando): se acota con el mismo timeout.
+      job = await Promise.race([
+        adding,
+        new Promise<never>((_, reject) => {
+          addTimer = setTimeout(() => {
+            timedOut = true;
+            reject(new DeviceOpTimeoutError(`timeout tras ${timeoutMs}ms al encolar ${name}`));
+          }, timeoutMs);
+        }),
+      ]);
     } catch (err) {
+      if (timedOut) {
+        // Si el job llega a encolarse tarde, se retira para que el worker no lo ejecute (best-effort).
+        adding.then((late) => late.remove()).catch(() => undefined);
+        throw err;
+      }
       throw new DeviceOpTimeoutError(`no se pudo encolar ${name}: ${(err as Error).message}`);
+    } finally {
+      if (addTimer) clearTimeout(addTimer);
     }
-    return this.waitForJobResult<T>(job, timeoutMs);
+    // El resto del presupuesto para esperar el resultado (la operación completa no excede timeoutMs).
+    return this.waitForJobResult<T>(job, Math.max(1, deadline - Date.now()));
   }
 
   private async waitForJobResult<T>(job: Job<DeviceOpData>, timeoutMs: number): Promise<T> {
