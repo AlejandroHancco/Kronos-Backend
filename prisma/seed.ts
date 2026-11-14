@@ -1,6 +1,6 @@
-import { PrismaClient } from '@prisma/client';
+import { createSeedClient } from './seed-client';
 
-const prisma = new PrismaClient();
+const { prisma, pool } = createSeedClient();
 
 const ALL_PERMISSIONS = [
   'team:create', 'team:edit', 'team:delete', 'team:view',
@@ -97,4 +97,4 @@ async function main() {
 
 main()
   .catch((e) => { console.error(e); process.exit(1); })
-  .finally(() => prisma.$disconnect());
+  .finally(async () => { await prisma.$disconnect(); await pool.end().catch(() => undefined); });

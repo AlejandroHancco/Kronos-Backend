@@ -5,28 +5,42 @@ Copy `.env.example` to `.env` on each VM and fill it in.
 
 ## Order
 
+First deploy: **data -> api (migrate) -> seed once -> worker -> frontend/Caddy**.
+
 1. **vm-data** - `cd deploy/vm-data && cp .env.example .env`, set `POSTGRES_IMAGE_TAG` (default 16;
    if you will migrate existing data, the source Postgres major, e.g. 17), then `docker compose up -d`.
    On the first init (empty data volume) `./initdb/01-platform-schema.sql` is mounted into
    `/docker-entrypoint-initdb.d` and creates schema `platform` with the search_path set. It does not
-   run again on an already initialised volume.
+   run again on an already initialised volume (see the recovery note below).
    Only if carrying over existing data: see [vm-data/MIGRATION.md](vm-data/MIGRATION.md).
    Backups: `backup.sh`, cron `0 3 * * * /opt/smartconcrete/deploy/vm-data/backup.sh`
    (daily `pg_dump -Fc` into `backups/`, keeps the 7 newest).
-2. **vm-worker** - install Tailscale on the host first ([vm-worker/TAILSCALE.md](vm-worker/TAILSCALE.md)),
-   then `cd deploy/vm-worker && cp .env.example .env && docker compose up -d --build`.
-3. **vm-app** - `cd deploy/vm-app && cp .env.example .env && docker compose --env-file .env up -d --build`.
-   The frontend is built from `../KronosFrontend` (sibling of this repo; it has its own Dockerfile).
-   DNS for `APP_DOMAIN` and `API_DOMAIN` must point to this VM before first start (Caddy issues
-   certificates automatically). Caddy proxies WebSocket (Socket.io) by default.
-   The api runs `prisma migrate deploy` on start (creates the tables in schema `platform`).
-   **First deploy only**, once the api is up, load the base data (roles, permissions, ...):
+2. **api (vm-app)** - `cd deploy/vm-app && cp .env.example .env && docker compose --env-file .env up -d --build api`.
+   It runs `prisma migrate deploy` on start (creates the tables in schema `platform`). Check `/health`.
+3. **seed, once** (first deploy only), still on vm-app:
    ```bash
    docker compose exec api npm run seed
    ```
-   The runtime image contains `tsx` and `prisma/seed.ts` (both needed by `seed`), so it runs
+   The runtime image contains `tsx`, `prisma/seed.ts` and `prisma/seed-client.ts`, so it runs
    inside the container. Do not re-run it blindly on a populated database.
-   First-deploy order: vm-data, then api (migrations), then seed, then worker.
+4. **vm-worker** - install Tailscale on the host first ([vm-worker/TAILSCALE.md](vm-worker/TAILSCALE.md)),
+   then `cd deploy/vm-worker && cp .env.example .env && docker compose up -d --build`.
+5. **frontend + Caddy (vm-app)** - `docker compose --env-file .env up -d --build` (starts the rest).
+   The frontend is built from `../KronosFrontend` (sibling of this repo; it has its own Dockerfile).
+   DNS for `APP_DOMAIN` and `API_DOMAIN` must point to this VM before first start (Caddy issues
+   certificates automatically). Caddy proxies WebSocket (Socket.io) by default.
+
+**Recovery: vm-data volume already initialised (initdb did not run).** Symptom: after the api's
+first migrate, the tables are in schema `public` instead of `platform`
+(`docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" "$POSTGRES_DB" -c "\dt public.*"'`
+lists them, or `\dn` shows no `platform`). To avoid it, BEFORE the api's first `migrate deploy`, on vm-data:
+```bash
+docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" "$POSTGRES_DB" \
+  -c "CREATE SCHEMA IF NOT EXISTS platform;" \
+  -c "ALTER DATABASE \"$POSTGRES_DB\" SET search_path TO platform, public;"'
+```
+If the tables already landed in `public` of a database that holds nothing else, reset it
+(`DROP SCHEMA public CASCADE; CREATE SCHEMA public;`), run the two statements above, and restart the api.
 
 ## Firewall
 

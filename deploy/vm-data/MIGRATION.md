@@ -4,6 +4,8 @@ Only needed when carrying over an existing database whose app tables are in sche
 A fresh deployment needs no migration: vm-data starts empty, `initdb/01-platform-schema.sql`
 creates the `platform` schema on first init, `prisma migrate deploy` (api start) builds the tables
 and `npm run seed` loads the base data.
+If the data volume was already initialised, initdb did not run: create the schema and search_path by hand before the first migrate (see the recovery note in ../README.md).
+If the data volume was already initialised, initdb did not run: create the schema and search_path by hand before the first migrate (see the recovery note in ../README.md).
 
 Source: current Postgres (today the Supabase one, the existing `DATABASE_URL`).
 Target: Postgres on vm-data, same major as the source. Only schema `platform` is copied
