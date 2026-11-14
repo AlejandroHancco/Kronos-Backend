@@ -64,7 +64,8 @@ describe('LaasInstancesService: getSensorMetadata / getActuatorMetadata', () => 
     expect(sensors.map((s) => s.sensorId)).toEqual([`${HIOKI}:hioki-im3570-lcr`, `${TEMP}:sim-temperature-th`, `${OTHER_HIOKI}:hioki-im3570-lcr`]);
     const hioki = sensors[0];
     expect(Object.keys(hioki)).toEqual(expect.arrayContaining(['sensorId', 'fullName', 'description', 'protocol', 'produces', 'sensorValues', 'sensorConfiguration', 'accessMode']));
-    expect(hioki).toMatchObject({ protocol: 'http', 'x-deviceProtocol': 'tcp', 'x-device': { id: HIOKI, name: 'Hioki A', deviceType: 'hioki-im3570' } });
+    // produces = MIME del servicio LaaS; el formato del equipo va en x-deviceProduces
+    expect(hioki).toMatchObject({ protocol: 'http', produces: 'application/json', 'x-deviceProduces': 'text/csv', 'x-deviceProtocol': 'tcp', 'x-device': { id: HIOKI, name: 'Hioki A', deviceType: 'hioki-im3570' } });
     // Tabla 15: lastMeasured (columnas de atribución) y label como extensión x-label
     expect(hioki.sensorValues.every((v) => v.lastMeasured === '2026-11-01T10:00:00.000Z')).toBe(true);
     expect(hioki.sensorValues[0]).not.toHaveProperty('label');
@@ -96,7 +97,8 @@ describe('LaasInstancesService: getSensorMetadata / getActuatorMetadata', () => 
       actuatorId: `${MUX}:kronos-mux-16-channel`,
       protocol: 'http',
       'x-deviceProtocol': 'http',
-      inputType: 'integer',
+      inputType: 'application/json',
+      'x-deviceInputType': 'integer',
       actuatorConfiguration: [],
       accessMode: { accessModeType: 'pull' },
       actuatorValues: [{ name: 'channel', rangeMinimum: 1, rangeMaximum: 16, rangeStep: 1 }],

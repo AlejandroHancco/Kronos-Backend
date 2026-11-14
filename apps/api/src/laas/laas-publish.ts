@@ -9,7 +9,7 @@ import type {
   SensorValueMetadata,
   StoredMeasurementPoint,
 } from '@app/laas-catalog';
-import { LAAS_PROTOCOL } from './laas-operations';
+import { LAAS_PRODUCES, LAAS_PROTOCOL } from './laas-operations';
 import { toLaasId } from './laas-ids';
 
 /**
@@ -44,6 +44,8 @@ export interface LaasSensor {
   sensorConfiguration: LaasConfigurationElement[];
   accessMode: SensorMetadata['accessMode'];
   'x-deviceProtocol': string;
+  /** Formato que entrega el equipo (catálogo); `produces` es el MIME del servicio LaaS. */
+  'x-deviceProduces': string;
   'x-acquisition': AcquisitionMetadata;
   'x-device': LaasDeviceRef;
 }
@@ -59,6 +61,8 @@ export interface LaasActuator {
   actuatorConfiguration: LaasConfigurationElement[];
   accessMode: ActuatorMetadata['accessMode'];
   'x-deviceProtocol': string;
+  /** Tipo de valor que acepta el equipo (catálogo); `inputType` es el MIME del servicio LaaS. */
+  'x-deviceInputType': string;
   'x-device': LaasDeviceRef;
 }
 
@@ -123,11 +127,12 @@ export function publishSensor(device: LaasDeviceRef, s: SensorMetadata, lastMeas
     fullName: s.fullName,
     description: s.description,
     protocol: LAAS_PROTOCOL,
-    produces: s.produces,
+    produces: LAAS_PRODUCES,
     sensorValues: s.sensorValues.map((v) => sensorValueOf(v, lastMeasured)),
     sensorConfiguration: sensorConfigurationOf(s.acquisition),
     accessMode: { ...s.accessMode },
     'x-deviceProtocol': s.protocol,
+    'x-deviceProduces': s.produces,
     'x-acquisition': s.acquisition,
     'x-device': device,
   };
@@ -139,12 +144,13 @@ export function publishActuator(device: LaasDeviceRef, a: ActuatorMetadata): Laa
     fullName: a.fullName,
     description: a.description,
     protocol: LAAS_PROTOCOL,
-    inputType: a.inputType,
+    inputType: LAAS_PRODUCES,
     actuatorValues: a.actuatorValues.map((v) => ({ ...v })),
     // La configuración de Kronos es por dispositivo (getConfiguration), no por actuador.
     actuatorConfiguration: [],
     accessMode: { ...a.accessMode },
     'x-deviceProtocol': a.protocol,
+    'x-deviceInputType': a.inputType,
     'x-device': device,
   };
 }
