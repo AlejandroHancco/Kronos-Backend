@@ -1,26 +1,21 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Device, Prisma, TaskPreference, TaskPreferenceRange } from '@prisma/client';
 import { PrismaService } from '@app/database';
+import type { DeviceContext, DeviceServiceDescription } from './contract';
+import { AcquisitionMetadata, SweepRange, acquisitionOf, rangesError } from './acquisition';
+import { toDeviceContext } from './configuration';
 import {
-  AcquisitionMetadata,
   ChannelRange,
-  DeviceContext,
-  DeviceServiceDescription,
-  ExperimentDefinition,
-  LaasCatalog,
   MeasurementValueMeta,
-  SweepRange,
-  acquisitionOf,
   channelRangeFor,
   channelRangeMessage,
   experimentConfigError,
-  experimentFor,
   invalidChannels,
-  rangesError,
-  toDeviceContext,
   typeLabel,
   valueMetasOf,
-} from '@app/laas-catalog';
+} from './experiment-config';
+import { ExperimentDefinition, experimentFor } from './experiments';
+import { LaasCatalog } from './laas-catalog';
 
 /**
  * Experimento activo de una tarea, resuelto solo con metadata del catálogo (sin drivers): quien

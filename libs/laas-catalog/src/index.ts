@@ -7,3 +7,5 @@ export * from './experiments';
 export * from './laas-catalog';
 export * from './laas-catalog.module';
 export * from './models';
+export * from './experiment-config.service';
+export * from './measurement-data';

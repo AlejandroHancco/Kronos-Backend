@@ -2,11 +2,11 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '@app/database';
 import { TeamScopeService } from '@app/common';
 import { MeasurementSchedulingService } from '../scheduler/scheduling.service';
-import { ExperimentConfigService } from '../device-plugins/core/experiment-config.service';
+import { ExperimentConfigService } from '@app/laas-catalog';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { MeasureDto } from './dto/measure.dto';
-import { channelNumbersOf, parseAcquisitionSnapshot } from '../measurements/measurement-data';
+import { channelNumbersOf, parseAcquisitionSnapshot } from '@app/laas-catalog';
 import { loadSingleReadings, singleReadingFields } from '../measurements/single-readings';
 
 @Injectable()

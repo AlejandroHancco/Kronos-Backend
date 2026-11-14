@@ -5,7 +5,6 @@ import { DeviceDriversModule } from '@app/device-drivers';
 import { DevicePluginsController } from './device-plugins.controller';
 import { PrismaModule } from '@app/database';
 import { PermissionsModule } from '../permissions/permissions.module';
-import { ExperimentConfigService } from './core/experiment-config.service';
 import { ExperimentCatalogService } from './core/experiment-catalog.service';
 import { DeviceActivityService } from './core/device-activity.service';
 import { DeviceConfigurationService } from './core/device-configuration.service';
@@ -23,7 +22,6 @@ import { CommonModule } from '@app/common';
   imports: [PrismaModule, PermissionsModule, CommonModule, LaasCatalogModule, DeviceDriversModule],
   controllers: [DevicePluginsController, ExperimentsController, ProjectExperimentsController],
   providers: [
-    ExperimentConfigService,
     ExperimentCatalogService,
     DeviceActivityService,
     DeviceConfigurationService,
@@ -31,7 +29,6 @@ import { CommonModule } from '@app/common';
   exports: [
     LaasCatalogModule,
     DeviceDriversModule,
-    ExperimentConfigService,
     ExperimentCatalogService,
     DeviceActivityService,
     DeviceConfigurationService,

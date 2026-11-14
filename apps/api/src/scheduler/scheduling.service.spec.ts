@@ -13,7 +13,6 @@ function setup(opts: { resolved?: any; resolveError?: unknown } = {}) {
   const prisma = {
     taskPreference: { findFirst: jest.fn(async () => null) },
   };
-  const measurementsService = {};
   const kronosGateway = {};
   const experimentConfig = {
     resolve: jest.fn(async () => {
@@ -24,7 +23,6 @@ function setup(opts: { resolved?: any; resolveError?: unknown } = {}) {
   const measurementQueue = { add: jest.fn(), getJobs: jest.fn(async () => []) };
   const service = new MeasurementSchedulingService(
     prisma as any,
-    measurementsService as any,
     kronosGateway as any,
     experimentConfig as any,
     measurementQueue as any,

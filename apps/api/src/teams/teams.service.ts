@@ -10,7 +10,7 @@ import { PermissionsService } from '../permissions/permissions.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { TeamRole, MemberStatus } from '@prisma/client';
 import { NormalizedUser } from '../auth/interfaces/auth.interface';
-import { parseAcquisitionSnapshot } from '../measurements/measurement-data';
+import { parseAcquisitionSnapshot } from '@app/laas-catalog';
 
 const ROLE_TEAM_ADMIN_ID = 2;   // Administrador de Equipo
 const ROLE_OPERATOR_ID   = 4;   // Operario (default para miembros degradados)

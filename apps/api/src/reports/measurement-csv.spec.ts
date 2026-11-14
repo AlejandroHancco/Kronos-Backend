@@ -2,7 +2,7 @@ import {
   buildCsv, csvPreamble, rowsToCsvLines, csvHeader, measurementToRows, CsvMeasurement, unitSlug, valueColumnsFor,
   xColumnOf, blockKeyOf,
 } from './measurement-csv';
-import { parseSensorValues } from '../measurements/measurement-data';
+import { parseSensorValues } from '@app/laas-catalog';
 import type { AcquisitionSnapshot } from '@app/laas-catalog';
 
 const FREQUENCY_SWEEP: AcquisitionSnapshot = { kind: 'sweep', variable: { name: 'frequency', unit: 'Hz', label: 'Frecuencia' } };

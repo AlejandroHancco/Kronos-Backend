@@ -1,7 +1,8 @@
 import { BadRequestException, Logger } from '@nestjs/common';
 import { SchedulerService } from './scheduler.service';
-import { MeasurementSchedulingService, PRIORITY_SCHEDULED } from './scheduling.service';
-import { ExperimentConfigService } from '../device-plugins/core/experiment-config.service';
+import { PRIORITY_SCHEDULED } from '@app/queue';
+import { MeasurementSchedulingService } from './scheduling.service';
+import { ExperimentConfigService } from '@app/laas-catalog';
 
 const sweepAcq = {
   kind: 'sweep' as const,
@@ -62,12 +63,11 @@ function setup(dueJobs: any[], resolveFor: (taskId: number) => unknown) {
   });
   const queue = { add: jest.fn(async () => ({ id: 'q1' })), getJobs: jest.fn(async () => []) };
   const kronosGateway = { jobStatus: jest.fn() };
-  const measurementsService = { measureTask: jest.fn() };
   const scheduling = new MeasurementSchedulingService(
-    prisma as any, measurementsService as any, kronosGateway as any, experimentConfig, queue as any,
+    prisma as any, kronosGateway as any, experimentConfig, queue as any,
   );
   const service = new SchedulerService(
-    prisma as any, measurementsService as any, scheduling, kronosGateway as any, queue as any, experimentConfig,
+    prisma as any, scheduling, kronosGateway as any, queue as any, experimentConfig,
   );
   return { service, prisma, queue, resolve, kronosGateway };
 }

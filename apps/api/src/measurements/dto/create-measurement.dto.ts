@@ -1,5 +1,5 @@
 import { ArrayMaxSize, ArrayNotEmpty, IsArray, IsNumber, IsObject, IsUUID, IsString, IsOptional } from 'class-validator';
-import { MAX_POSTED_POINTS, type MeasurementValueMeta } from '../measurement-data';
+import { MAX_POSTED_POINTS, type MeasurementValueMeta } from '@app/laas-catalog';
 import type { AcquisitionSnapshot } from '@app/laas-catalog';
 
 export class CreateMeasurementDto {

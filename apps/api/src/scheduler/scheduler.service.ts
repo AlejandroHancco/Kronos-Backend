@@ -1,18 +1,12 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectQueue } from '@nestjs/bull';
 import type { Queue } from 'bull';
 import { PrismaService } from '@app/database';
-import { MeasurementsService } from '../measurements/measurements.service';
-import { ExperimentConfigService } from '../device-plugins/core/experiment-config.service';
+import { ExperimentConfigService } from '@app/laas-catalog';
 import { RealtimePublisher } from '@app/realtime';
-import { MEASUREMENTS_QUEUE } from '../queue/queue.constants';
-import {
-  MeasurementSchedulingService,
-  MeasurementJobData,
-  ExecutionEstimate,
-  PRIORITY_SCHEDULED,
-} from './scheduling.service';
+import { MEASUREMENTS_QUEUE, MeasurementJobData, PRIORITY_SCHEDULED } from '@app/queue';
+import { MeasurementSchedulingService, ExecutionEstimate } from './scheduling.service';
 import { deviceIdsOf, runningJobDeviceIds } from './device-usage';
 
 /**
@@ -22,7 +16,6 @@ import { deviceIdsOf, runningJobDeviceIds } from './device-usage';
  *  2. Resuelve el experimento y valida los rangos (solo barridos); si falla, el job pasa a 'failed'
  *  3. Salta los que usan un dispositivo (equipo de medición / selector de canal) ya ocupado por un job 'running'
  *  4. Marca el job como 'running' y lo publica en la cola Bull 'measurements' con prioridad alta
- *     (o fallback directo sin Redis)
  *  5. Si tiene intervalMinutes y quedan repeticiones, crea el siguiente job
  *     con startAt = ahora + intervalMinutes y repeatCount - 1
  */
@@ -33,12 +26,10 @@ export class SchedulerService {
 
   constructor(
     private prisma: PrismaService,
-    private measurementsService: MeasurementsService,
     private schedulingService: MeasurementSchedulingService,
     private realtime: RealtimePublisher,
-    @Optional()
     @InjectQueue(MEASUREMENTS_QUEUE)
-    private measurementQueue: Queue<MeasurementJobData> | undefined,
+    private measurementQueue: Queue<MeasurementJobData>,
     private experimentConfig: ExperimentConfigService,
   ) {}
 
@@ -157,37 +148,15 @@ export class SchedulerService {
       executionIndex: job.executionIndex,
     };
 
-    // 4. Publicar en la cola Bull con prioridad alta (o fallback directo si no hay Redis)
-    if (this.measurementQueue) {
-      await this.measurementQueue.add('execute', payload, {
-        attempts: 3,
-        backoff: { type: 'exponential', delay: 2000 },
-        removeOnComplete: 100,
-        removeOnFail: 100,
-        priority: PRIORITY_SCHEDULED, // por delante de las mediciones manuales
-      });
-      this.logger.log(`Job ${job.id} publicado en la cola (execution ${job.executionIndex})`);
-    } else {
-      // Sin Redis: ejecución directa fire-and-forget con actualización de status
-      this.logger.warn(`Job ${job.id} ejecutándose directamente (sin REDIS_URL)`);
-      this.schedulingService.trackFallbackRun(payload.jobId, payload.estimatedSeconds);
-      void this.measurementsService
-        .measureTask(job.taskId, job.createdBy, payload)
-        .then(() =>
-          this.prisma.scheduledJob.update({
-            where: { id: job.id },
-            data: { status: 'completed' },
-          }),
-        )
-        .catch((error) => {
-          this.logger.error(`Job ${job.id} falló: ${error.message}`);
-          return this.prisma.scheduledJob.update({
-            where: { id: job.id },
-            data: { status: 'failed' },
-          });
-        })
-        .finally(() => this.schedulingService.untrackFallbackRun(payload.jobId));
-    }
+    // 4. Publicar en la cola Bull con prioridad alta
+    await this.measurementQueue.add('execute', payload, {
+      attempts: 3,
+      backoff: { type: 'exponential', delay: 2000 },
+      removeOnComplete: 100,
+      removeOnFail: 100,
+      priority: PRIORITY_SCHEDULED, // por delante de las mediciones manuales
+    });
+    this.logger.log(`Job ${job.id} publicado en la cola (execution ${job.executionIndex})`);
 
     this.realtime.jobStatus(job.createdBy, {
       jobId: `scheduled-${job.id}`,

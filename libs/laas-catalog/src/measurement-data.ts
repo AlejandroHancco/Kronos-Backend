@@ -1,7 +1,6 @@
-import type { MeasuredPoint } from '@app/laas-catalog';
-import type { AcquisitionSnapshot } from '@app/laas-catalog';
-import { CHANNEL_SLOTS, type MeasurementValueMeta } from '@app/laas-catalog';
-export { CHANNEL_SLOTS, type MeasurementValueMeta };
+import type { MeasuredPoint } from './contract';
+import type { AcquisitionSnapshot } from './acquisition';
+import { CHANNEL_SLOTS, type MeasurementValueMeta } from './experiment-config';
 
 /** Formato de Measurement.data: por valor de la variable (`x`; sin `x` en lecturas puntuales), 16 slots por sensorValue. */
 export interface StoredMeasurementPoint { x?: number; values: Record<string, number[]> }

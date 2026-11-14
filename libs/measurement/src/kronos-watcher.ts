@@ -1,4 +1,4 @@
-import type { StoredMeasurementPoint } from './measurement-data';
+import type { StoredMeasurementPoint } from '@app/laas-catalog';
 
 export type MeasurementSeverity = 'correct' | 'warning' | 'error';
 

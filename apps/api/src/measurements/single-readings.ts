@@ -1,6 +1,6 @@
 import type { PrismaService } from '@app/database';
 import type { AcquisitionSnapshot } from '@app/laas-catalog';
-import { parseSensorValues, storedPointsOf, type MeasurementValueMeta, type StoredMeasurementPoint } from './measurement-data';
+import { parseSensorValues, storedPointsOf, type MeasurementValueMeta, type StoredMeasurementPoint } from '@app/laas-catalog';
 
 export interface SingleReading { data: StoredMeasurementPoint[]; sensorValues: MeasurementValueMeta[] }
 

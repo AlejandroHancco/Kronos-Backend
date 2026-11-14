@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '@app/database';
 import { TeamScopeService } from '@app/common';
-import { ExperimentConfigService } from '../device-plugins/core/experiment-config.service';
+import { ExperimentConfigService } from '@app/laas-catalog';
 import { CreateScheduledJobDto } from './dto/create-scheduled-job.dto';
 
 @Injectable()

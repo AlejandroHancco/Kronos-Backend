@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client';
 import type { Response } from 'express';
 import { PrismaService } from '@app/database';
 import { TeamScopeService } from '@app/common';
-import { parseAcquisitionSnapshot, parseSensorValues, storedPointsOf } from '../measurements/measurement-data';
+import { parseAcquisitionSnapshot, parseSensorValues, storedPointsOf } from '@app/laas-catalog';
 import { loadSingleReadings, singleReadingFields } from '../measurements/single-readings';
 import {
   buildCsv, csvPreamble, rowsToCsvLines, valueColumnsFor, csvHeader, defaultCsvHeader, xColumnOf, blockKeyOf, CsvChannel, CsvMeasurement,
