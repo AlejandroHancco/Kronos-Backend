@@ -1,7 +1,6 @@
 import { BadRequestException, Logger } from '@nestjs/common';
 import { SchedulerService } from './scheduler.service';
 import { PRIORITY_SCHEDULED } from '@app/queue';
-import { MeasurementSchedulingService } from './scheduling.service';
 import { ExperimentConfigService } from '@app/experiments';
 
 const sweepAcq = {
@@ -43,9 +42,9 @@ function resolvedWith(acquisition: unknown, ranges: unknown[], over: Record<stri
 
 /**
  * resolveFor: taskId → ResolvedExperiment | null | Error (lanzado por resolve).
- * Se usa el MeasurementSchedulingService real (helper compartido) y el assertRanges real.
+ * Se usa el assertRanges real y la estimación de @app/measurement.
  */
-function setup(dueJobs: any[], resolveFor: (taskId: number) => unknown) {
+function setup(dueJobs: any[], resolveFor: (taskId: number) => unknown, leader = true) {
   const prisma = {
     scheduledJob: {
       findMany: jest.fn(async (args: any) => (args?.where?.status === 'running' ? [] : dueJobs)),
@@ -63,13 +62,17 @@ function setup(dueJobs: any[], resolveFor: (taskId: number) => unknown) {
   });
   const queue = { add: jest.fn(async () => ({ id: 'q1' })), getJobs: jest.fn(async () => []) };
   const kronosGateway = { jobStatus: jest.fn() };
-  const scheduling = new MeasurementSchedulingService(
-    prisma as any, kronosGateway as any, experimentConfig, queue as any,
-  );
+  const lockService = {
+    runAsLeader: jest.fn(async (_name: string, _ttl: number, fn: () => Promise<void>) => {
+      if (!leader) return false;
+      await fn();
+      return true;
+    }),
+  };
   const service = new SchedulerService(
-    prisma as any, scheduling, kronosGateway as any, queue as any, experimentConfig,
+    prisma as any, experimentConfig, kronosGateway as any, lockService as any, queue as any,
   );
-  return { service, prisma, queue, resolve, kronosGateway };
+  return { service, prisma, queue, resolve, kronosGateway, lockService };
 }
 
 describe('SchedulerService.processPendingJobs', () => {
@@ -80,6 +83,13 @@ describe('SchedulerService.processPendingJobs', () => {
   afterEach(() => {
     jest.useRealTimers();
     jest.restoreAllMocks();
+  });
+
+  it('corre solo como líder "scheduler" con TTL 55 000 ms', async () => {
+    const { service, prisma, lockService } = setup([job()], () => resolvedWith(singleAcq, []), false);
+    await service.processPendingJobs();
+    expect(lockService.runAsLeader).toHaveBeenCalledWith('scheduler', 55_000, expect.any(Function));
+    expect(prisma.scheduledJob.findMany).not.toHaveBeenCalled();
   });
 
   it('tarea de lectura puntual (sin rangos): despacha el job y programa la siguiente repetición', async () => {
@@ -101,7 +111,7 @@ describe('SchedulerService.processPendingJobs', () => {
     });
   });
 
-  it('barrido: despacha con los rangos guardados y la estimación del helper compartido', async () => {
+  it('barrido: despacha con los rangos guardados y la estimación de @app/measurement', async () => {
     const ranges = [{ start: 1000, stop: 2000, points: 801, scale: 'LIN' }];
     const { service, queue } = setup([job()], () => resolvedWith(sweepAcq, ranges));
     await service.processPendingJobs();

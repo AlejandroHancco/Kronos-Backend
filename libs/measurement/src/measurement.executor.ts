@@ -6,6 +6,7 @@ import { RealtimePublisher } from '@app/realtime';
 import { NotificationWriter } from '@app/notifications';
 import { DeviceDriverRegistry } from '@app/device-drivers';
 import { ExperimentConfigService } from '@app/experiments';
+import { LiveValueStore } from '@app/redis';
 import {
   buildMeasurementData,
   requestsFor,
@@ -27,7 +28,17 @@ export class MeasurementExecutor {
       private notifications: NotificationWriter,
       private experimentConfig: ExperimentConfigService,
       private drivers: DeviceDriverRegistry,
+      private liveValues: LiveValueStore,
   ) {}
+
+  /** Registra un valor live aplicado (best-effort: un fallo de Redis no invalida el canal medido). */
+  private async recordLiveValue(deviceId: string, values: Record<string, number>): Promise<void> {
+    try {
+      await this.liveValues.record(deviceId, values);
+    } catch (err) {
+      this.logger.warn(`No se pudo registrar el valor live de ${deviceId}: ${(err as Error).message}`);
+    }
+  }
 
   /** Notifica al equipo del resultado de una medición (según clasificación del Kronos Watcher), sin romper el flujo si falla. */
   private async notifyTeamOfMeasurementOutcome(
@@ -96,6 +107,11 @@ export class MeasurementExecutor {
       const selectorDevice = taskPreference.channelSelectorDevice;
       const sensorDriver = this.drivers.sensor(taskPreference.sensorDevice.type);
       const selectorDriver = selector ? this.drivers.actuator(selectorDevice?.type) : null;
+      // Ledger: si el modelo del selector declara un parámetro 'live' con el nombre del valor que
+      // elige el canal (MUX: "channel"), el último canal aplicado queda en LiveValueStore (Redis).
+      const recordsSelectorValue = !!selector?.description.configuration?.some(
+          (p) => p.name === selector.valueName && p.storage === 'live',
+      );
       const valueNames = valueMetas.map((v) => v.name);
       deviceNames = [sensor.context.name, selector?.context.name].filter((n): n is string => !!n);
 
@@ -131,6 +147,7 @@ export class MeasurementExecutor {
           // 3a. Activar el canal en el selector (setActuatorData) si la configuración tiene uno
           if (selector) {
             await selectorDriver!.setActuatorData(selector.context, selector.actuatorId, { [selector.valueName]: channel });
+            if (recordsSelectorValue) await this.recordLiveValue(selector.context.id, { [selector.valueName]: channel });
           }
 
           // 3b. Medir todos los rangos para este canal (getSensorData del equipo de medición)

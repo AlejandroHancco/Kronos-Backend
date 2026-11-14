@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
 import { Device, Prisma } from '@prisma/client';
 import { PrismaService } from '@app/database';
-import { DeviceStateService } from '@app/redis';
+import { DeviceStateService, deviceBusyMessage } from '@app/redis';
 import { DeviceOpsClient } from '@app/queue';
 import {
   ConfigurationParameterMetadata,
@@ -14,8 +14,6 @@ import {
   splitPatch,
 } from '@app/laas-catalog';
 import { deviceOpTimeoutMs, mapDeviceOpError } from './device-op-errors';
-
-const busyMessage = (name: string) => `"${name}" está midiendo; espera a que termine para cambiar su configuración`;
 
 export type ConfigurationParameterView = ConfigurationParameterMetadata & { value: ConfigurationValue | null };
 
@@ -84,7 +82,7 @@ export class DeviceConfigurationService {
 
     if (hasLive) {
       // Camino rápido: el 409 definitivo lo da el worker (withExclusive) al ejecutar la operación.
-      if (await this.deviceState.isBusy(device.id)) throw new ConflictException(busyMessage(device.name));
+      if (await this.deviceState.isBusy(device.id)) throw new ConflictException(deviceBusyMessage(device.name));
       try {
         await this.deviceOps.request('apply-live-configuration', { deviceId: device.id, values: live }, deviceOpTimeoutMs());
       } catch (e) {

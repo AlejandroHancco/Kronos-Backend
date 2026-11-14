@@ -3,6 +3,7 @@ import type Redis from 'ioredis';
 import { PrismaService, runningJobDeviceIds } from '@app/database';
 import { REDIS_CLIENT } from './redis.constants';
 import { RedisLockService } from './redis-lock.service';
+import { deviceBusyMessage } from './device-busy';
 
 const EXCLUSIVE_TTL_MS = 60_000;
 const EXCLUSIVE_RENEW_MS = 20_000;
@@ -35,7 +36,7 @@ export class DeviceStateService {
     const key = `lock:device:${device.id}`;
     const token = await this.locks.tryAcquire(key, this.ttlMs);
     if (!token) {
-      throw new ConflictException(`"${device.name}" está midiendo; espera a que termine para cambiar su configuración`);
+      throw new ConflictException(deviceBusyMessage(device.name));
     }
     const timer = setInterval(() => {
       this.locks

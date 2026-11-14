@@ -25,7 +25,7 @@
     {
       "name": "channel",
       "label": "Canal activo",
-      "description": "Último canal activado por Kronos desde que inició el backend; el MUX no permite leerlo",
+      "description": "Último canal aplicado por Kronos (registrado en Redis); el MUX no permite leerlo",
       "type": "integer",
       "unit": "",
       "rangeMinimum": 1,

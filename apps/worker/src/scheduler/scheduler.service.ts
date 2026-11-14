@@ -2,16 +2,20 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectQueue } from '@nestjs/bull';
 import type { Queue } from 'bull';
-import { PrismaService } from '@app/database';
-import { ExperimentConfigService } from '@app/experiments';
+import { PrismaService, deviceIdsOf, runningJobDeviceIds } from '@app/database';
+import { ExperimentConfigService, ResolvedExperiment, toSweepRanges } from '@app/experiments';
+import type { SweepRange } from '@app/laas-catalog';
+import { estimateSeconds } from '@app/measurement';
 import { RealtimePublisher } from '@app/realtime';
+import { RedisLockService } from '@app/redis';
 import { MEASUREMENTS_QUEUE, MeasurementJobData, PRIORITY_SCHEDULED } from '@app/queue';
-import { MeasurementSchedulingService, ExecutionEstimate } from './scheduling.service';
-import { deviceIdsOf, runningJobDeviceIds } from './device-usage';
+
+/** TTL del liderazgo del cron; no se libera al terminar (el TTL cierra el turno del minuto). */
+const LEADER_TTL_MS = 55_000;
 
 /**
  * Cron que despacha los ScheduledJobs pendientes.
- * Corre cada minuto:
+ * Corre cada minuto, solo en la réplica que obtiene el liderazgo (lock Redis 'scheduler'):
  *  1. Busca jobs 'pending' con startAt <= ahora
  *  2. Resuelve el experimento y valida los rangos (solo barridos); si falla, el job pasa a 'failed'
  *  3. Salta los que usan un dispositivo (equipo de medición / selector de canal) ya ocupado por un job 'running'
@@ -26,11 +30,11 @@ export class SchedulerService {
 
   constructor(
     private prisma: PrismaService,
-    private schedulingService: MeasurementSchedulingService,
+    private experimentConfig: ExperimentConfigService,
     private realtime: RealtimePublisher,
+    private lockService: RedisLockService,
     @InjectQueue(MEASUREMENTS_QUEUE)
     private measurementQueue: Queue<MeasurementJobData>,
-    private experimentConfig: ExperimentConfigService,
   ) {}
 
   @Cron(CronExpression.EVERY_MINUTE)
@@ -39,34 +43,54 @@ export class SchedulerService {
     this.ticking = true;
 
     try {
-      const now = new Date();
-
-      // 1. Jobs pendientes cuyo startAt ya venció
-      const dueJobs = await this.prisma.scheduledJob.findMany({
-        where: { status: 'pending', startAt: { lte: now } },
-        orderBy: { startAt: 'asc' },
-      });
-
-      if (dueJobs.length === 0) return;
-
-      this.logger.log(`${dueJobs.length} scheduled job(s) due`);
-
-      // 2. Dispositivos ocupados por jobs actualmente en ejecución
-      const busyDevices = await this.getBusyDeviceIds();
-
-      for (const job of dueJobs) {
-        try {
-          await this.dispatchJob(job, now, busyDevices);
-        } catch (error) {
-          // Un job que falla no detiene el despacho de los demás en este tick
-          this.logger.error(`Job ${job.id}: error al despachar: ${error.message}`);
-        }
-      }
+      await this.lockService.runAsLeader('scheduler', LEADER_TTL_MS, () => this.tick());
     } catch (error) {
       this.logger.error(`Scheduler tick failed: ${error.message}`);
     } finally {
       this.ticking = false;
     }
+  }
+
+  private async tick(): Promise<void> {
+    const now = new Date();
+
+    // 1. Jobs pendientes cuyo startAt ya venció
+    const dueJobs = await this.prisma.scheduledJob.findMany({
+      where: { status: 'pending', startAt: { lte: now } },
+      orderBy: { startAt: 'asc' },
+    });
+
+    if (dueJobs.length === 0) return;
+
+    this.logger.log(`${dueJobs.length} scheduled job(s) due`);
+
+    // 2. Dispositivos ocupados por jobs actualmente en ejecución
+    const busyDevices = await this.getBusyDeviceIds();
+
+    for (const job of dueJobs) {
+      try {
+        await this.dispatchJob(job, now, busyDevices);
+      } catch (error) {
+        // Un job que falla no detiene el despacho de los demás en este tick
+        this.logger.error(`Job ${job.id}: error al despachar: ${error.message}`);
+      }
+    }
+  }
+
+  /**
+   * Experimento activo + rangos guardados + duración estimada (null = sin equipo de medición).
+   * Los BadRequestException de resolve/assertRanges se propagan.
+   */
+  private async resolveWithEstimate(
+    taskId: number,
+    channelCount: number,
+  ): Promise<{ resolved: ResolvedExperiment; ranges: SweepRange[]; estimatedSeconds: number } | null> {
+    const resolved = await this.experimentConfig.resolve(taskId);
+    if (!resolved) return null;
+    const ranges = toSweepRanges(resolved.preference.ranges);
+    this.experimentConfig.assertRanges(resolved, ranges);
+    const estimatedSeconds = estimateSeconds(resolved.acquisition, ranges, channelCount, !!resolved.selector);
+    return { resolved, ranges, estimatedSeconds };
   }
 
   /** IDs de dispositivos (equipo de medición + selector de canal) usados por jobs con status 'running' */
@@ -105,10 +129,9 @@ export class SchedulerService {
     // 1. Resolver el experimento y validar los rangos guardados ANTES de reclamar el job:
     //    si algo falla aquí el job pasa a 'failed' y nunca queda 'running' bloqueando sus dispositivos.
     //    Los rangos solo se exigen a sensores de barrido; una lectura puntual no lleva rangos.
-    let estimate: ExecutionEstimate | null;
+    let estimate: Awaited<ReturnType<SchedulerService['resolveWithEstimate']>>;
     try {
-      estimate = await this.schedulingService.resolveWithEstimate(job.taskId, job.channelNumbers.length);
-      if (estimate) this.experimentConfig.assertRanges(estimate.resolved, estimate.ranges);
+      estimate = await this.resolveWithEstimate(job.taskId, job.channelNumbers.length);
     } catch (error) {
       await this.failJob(job.id, error.message);
       return;

@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
+import { KRONOS_MUX_16 } from '@app/laas-catalog';
 import { MeasurementExecutor } from './measurement.executor';
 
 function setup(resolved?: any, plugins: { sensor?: unknown; selector?: unknown } = {}) {
@@ -15,10 +16,12 @@ function setup(resolved?: any, plugins: { sensor?: unknown; selector?: unknown }
   };
   const experimentConfig = { assertChannels: jest.fn(async () => resolved), assertRanges: jest.fn() };
   const drivers = { sensor: jest.fn(() => plugins.sensor), actuator: jest.fn(() => plugins.selector) };
+  const liveValues = { record: jest.fn(async (_id: string, _values: Record<string, number>): Promise<void> => undefined) };
   const executor = new MeasurementExecutor(
     prisma as any, teamScope as any, gateway as any, notifications as any, experimentConfig as any, drivers as any,
+    liveValues as any,
   );
-  return { executor, prisma, gateway, notifications, drivers };
+  return { executor, prisma, gateway, notifications, drivers, liveValues };
 }
 
 describe('MeasurementExecutor.measureTask (sensor + selector de canal)', () => {
@@ -74,6 +77,36 @@ describe('MeasurementExecutor.measureTask (sensor + selector de canal)', () => {
     expect(drivers.sensor).toHaveBeenCalledWith('sim-impedance');
     expect(drivers.actuator).toHaveBeenCalledWith('kronos-mux-16');
     expect(prisma.measurement.create.mock.calls[0][0].data).toMatchObject({ channelSelectorName: 'Mux', channelSelectorIp: '10.0.0.2', sensorDeviceName: 'Sim' });
+  });
+
+  it('ledger: tras cada setActuatorData registra el canal en LiveValueStore si el modelo declara ese parámetro live', async () => {
+    const calls: string[] = [];
+    const { resolved, plugins } = resolvedWith(calls, true);
+    resolved.selector!.description = KRONOS_MUX_16.description as any;
+    const { executor, liveValues } = setup(resolved, plugins);
+    liveValues.record.mockImplementation(async (_id: string, values: any) => { calls.push(`record:${values.channel}`); });
+    await executor.measureTask(1, 'u1', { ranges, selectedChannels: [2, 1] });
+    expect(calls).toEqual(['set:1', 'record:1', 'get:1', 'get:3', 'set:2', 'record:2', 'get:1', 'get:3']);
+    expect(liveValues.record).toHaveBeenNthCalledWith(1, 'm1', { channel: 1 });
+    expect(liveValues.record).toHaveBeenNthCalledWith(2, 'm1', { channel: 2 });
+  });
+
+  it('ledger: no registra nada si el selector no declara un parámetro live con ese nombre', async () => {
+    const { resolved, plugins } = resolvedWith([], true);
+    resolved.selector!.description = { configuration: [{ name: 'channel', storage: 'persisted' }] } as any;
+    const { executor, liveValues } = setup(resolved, plugins);
+    await executor.measureTask(1, 'u1', { ranges, selectedChannels: [1] });
+    expect(liveValues.record).not.toHaveBeenCalled();
+  });
+
+  it('ledger: un fallo al registrar no invalida el canal medido', async () => {
+    const { resolved, plugins, sensorPlugin } = resolvedWith([], true);
+    resolved.selector!.description = KRONOS_MUX_16.description as any;
+    const { executor, liveValues } = setup(resolved, plugins);
+    liveValues.record.mockRejectedValue(new Error('redis down'));
+    const out = await executor.measureTask(1, 'u1', { ranges, selectedChannels: [1] });
+    expect(sensorPlugin.getSensorData).toHaveBeenCalledTimes(2);
+    expect(out.totalPoints).toBe(2);
   });
 
   it('guarda la copia genérica del barrido, el snapshot de adquisición y puntos { x, values }', async () => {
