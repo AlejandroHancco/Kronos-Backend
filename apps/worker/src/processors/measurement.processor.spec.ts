@@ -78,6 +78,29 @@ describe('MeasurementProcessor.handleExecute', () => {
     expect(executor.measureTask).toHaveBeenCalled();
   });
 
+  it('si la preferencia cambió mientras esperaba los locks (dispositivo no bloqueado): error reintentable, sin medir', async () => {
+    const lockService = { withDeviceLocks: jest.fn(async (_ids: string[], fn: () => Promise<unknown>) => fn()) };
+    const { processor, prisma, executor } = setup({ sensorDeviceId: 'S', channelSelectorDeviceId: null }, lockService);
+    prisma.taskPreference.findFirst
+      .mockResolvedValueOnce({ sensorDeviceId: 'S', channelSelectorDeviceId: null })
+      .mockResolvedValueOnce({ sensorDeviceId: 'S', channelSelectorDeviceId: 'M2' });
+    await expect(processor.handleExecute(makeJob())).rejects.toThrow(
+      'La configuración de la tarea cambió mientras esperaba el equipo; se reintentará',
+    );
+    expect(prisma.taskPreference.findFirst).toHaveBeenCalledTimes(2);
+    expect(executor.measureTask).not.toHaveBeenCalled();
+  });
+
+  it('si tras los locks la preferencia sigue dentro de los ids bloqueados (p. ej. se quitó el MUX), mide', async () => {
+    const lockService = { withDeviceLocks: jest.fn(async (_ids: string[], fn: () => Promise<unknown>) => fn()) };
+    const { processor, prisma, executor } = setup({ sensorDeviceId: 'S', channelSelectorDeviceId: 'M' }, lockService);
+    prisma.taskPreference.findFirst
+      .mockResolvedValueOnce({ sensorDeviceId: 'S', channelSelectorDeviceId: 'M' })
+      .mockResolvedValueOnce({ sensorDeviceId: 'S', channelSelectorDeviceId: null });
+    await processor.handleExecute(makeJob());
+    expect(executor.measureTask).toHaveBeenCalledTimes(1);
+  });
+
   it('job de un ScheduledJob: lo marca completed', async () => {
     const lockService = { withDeviceLocks: jest.fn(async (_ids: string[], fn: () => Promise<unknown>) => fn()) };
     const { processor, prisma } = setup({ sensorDeviceId: 'S', channelSelectorDeviceId: null }, lockService);

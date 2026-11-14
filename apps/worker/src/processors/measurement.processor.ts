@@ -57,13 +57,25 @@ export class MeasurementProcessor {
     // Locks del equipo de medición y del selector (si hay) de la configuración activa; espera
     // (hasta DEVICE_LOCK_WAIT_MS) si otro job o un cambio de configuración los tiene.
     // Sin preferencia, measureTask falla con su propio error.
-    const preference = await this.prisma.taskPreference.findFirst({
-      where: { taskId },
-      orderBy: { createdAt: 'desc' },
-      select: { sensorDeviceId: true, channelSelectorDeviceId: true },
-    });
+    const readPreference = () =>
+      this.prisma.taskPreference.findFirst({
+        where: { taskId },
+        orderBy: { createdAt: 'desc' },
+        select: { sensorDeviceId: true, channelSelectorDeviceId: true },
+      });
+    const preference = await readPreference();
     const result = preference
-      ? await this.lockService.withDeviceLocks(deviceIdsOf(preference), measure)
+      ? await this.lockService.withDeviceLocks(deviceIdsOf(preference), async () => {
+          // La espera puede durar minutos: measureTask vuelve a resolver la preferencia dentro del
+          // lock, así que si ahora usa un dispositivo que NO bloqueamos, se aborta este intento y
+          // Bull reintenta tomando los locks de la configuración nueva.
+          const locked = new Set(deviceIdsOf(preference));
+          const current = await readPreference();
+          if (current && !deviceIdsOf(current).every((id) => locked.has(id))) {
+            throw new Error('La configuración de la tarea cambió mientras esperaba el equipo; se reintentará');
+          }
+          return measure();
+        })
       : await measure();
 
     // Si vino de un ScheduledJob, marcarlo como completado
