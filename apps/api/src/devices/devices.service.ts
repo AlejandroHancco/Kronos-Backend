@@ -209,9 +209,9 @@ export class DevicesService {
     if (!role) throw new NotFoundException(`No hay un device plugin registrado para el tipo "${device.type}"`);
     let service = this.catalog.describe(device.type!);
     if (role === 'sensor') {
-      // Aproximación: mediciones de tareas cuya preferencia ACTUAL usa este dispositivo.
+      // Atribución real: mediciones registradas con este dispositivo como sensor.
       const last = await this.prisma.measurement.findFirst({
-        where: { task: { taskPreferences: { some: { sensorDeviceId: device.id } } } },
+        where: { sensorDeviceId: device.id },
         orderBy: { takenAt: { sort: 'desc', nulls: 'last' } },
         select: { takenAt: true },
       });

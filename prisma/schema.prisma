@@ -10,26 +10,31 @@ datasource db {
   provider = "postgresql"
   schemas  = ["platform"]
 }
+
 enum DeviceStatus {
   online
   offline
   unchecked
   archived
+
   @@schema("platform")
 }
+
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model Device {
-  id                    String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  projectId             String             @db.Uuid
-  name                  String             @db.VarChar(150)
-  type                  String?            @db.VarChar(50)
-  ip                    String?            @db.VarChar(45)
-  createdAt             DateTime?          @default(now()) @db.Timestamptz(6)
-  project               Project            @relation(fields: [projectId], references: [uuid], onDelete: Cascade)
-  sensorTaskPreferences   TaskPreference[] @relation("sensorDevice")
+  id                             String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  projectId                      String           @db.Uuid
+  name                           String           @db.VarChar(150)
+  type                           String?          @db.VarChar(50)
+  ip                             String?          @db.VarChar(45)
+  createdAt                      DateTime?        @default(now()) @db.Timestamptz(6)
+  project                        Project          @relation(fields: [projectId], references: [uuid], onDelete: Cascade)
+  sensorTaskPreferences          TaskPreference[] @relation("sensorDevice")
   channelSelectorTaskPreferences TaskPreference[] @relation("channelSelectorDevice")
-  status                  DeviceStatus       @default(offline)
-  configuration           Json?
+  sensorMeasurements             Measurement[]    @relation("measurementSensorDevice")
+  channelSelectorMeasurements    Measurement[]    @relation("measurementChannelSelectorDevice")
+  status                         DeviceStatus     @default(offline)
+  configuration                  Json?
 
   @@map("devices")
   @@schema("platform")
@@ -37,59 +42,66 @@ model Device {
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model Measurement {
-  id                 Int               @id @default(autoincrement())
-  taskId             Int
-  takenBy            String            @db.Uuid
-  takenByName        String?           @db.VarChar(200)
-  takenByEmail       String?           @db.VarChar(255)
-  takenAt            DateTime?         @default(now()) @db.Timestamptz(6)
-  scheduledJobId    Int?               // null si fue manual
-  executionIndex    Int?               // qué repetición fue: 1, 2, 3...
-  rangeId            Int?
+  id             Int       @id @default(autoincrement())
+  taskId         Int
+  takenBy        String    @db.Uuid
+  takenByName    String?   @db.VarChar(200)
+  takenByEmail   String?   @db.VarChar(255)
+  takenAt        DateTime? @default(now()) @db.Timestamptz(6)
+  scheduledJobId Int? // null si fue manual
+  executionIndex Int? // qué repetición fue: 1, 2, 3...
+  rangeId        Int?
 
   // Snapshot del preset usado
-  presetName         String?           @db.VarChar(100)
+  presetName  String?  @db.VarChar(100)
   // Copia del barrido (null en lecturas puntuales)
-  start              Decimal?          @db.Decimal
-  stop               Decimal?          @db.Decimal
-  points             Int?
-  scale              String?           @db.VarChar(20)
+  start       Decimal? @db.Decimal
+  stop        Decimal? @db.Decimal
+  points      Int?
+  scale       String?  @db.VarChar(20)
   // { kind, variable? } (core/acquisition.ts AcquisitionSnapshot)
-  acquisition        Json
+  acquisition Json
 
   // Snapshot del sensor
-  sensorDeviceName   String            @db.VarChar(150)
-  sensorDeviceIp     String?           @db.VarChar(45)
+  sensorDeviceId   String? @db.Uuid
+  // Id del sensor del catálogo (description.sensors[].sensorId) usado
+  sensorId         String? @db.VarChar(100)
+  sensorDeviceName String  @db.VarChar(150)
+  sensorDeviceIp   String? @db.VarChar(45)
 
   // Snapshot del selector de canal
-  channelSelectorName String?          @db.VarChar(150)
-  channelSelectorIp  String?           @db.VarChar(45)
+  channelSelectorDeviceId String? @db.Uuid
+  channelSelectorName     String? @db.VarChar(150)
+  channelSelectorIp       String? @db.VarChar(45)
 
   // [{ x?, values: { <sensorValue>: number[16] } }]
-  data               Json
+  data         Json
   // [{ name, unit, label? }] declarados por el plugin
-  sensorValues       Json?
+  sensorValues Json?
 
   // Resultado del Kronos Watcher al momento de medir
-  watcherStatus      String?           @db.VarChar(10)
-  watcherReason      String?           @db.VarChar(300)
+  watcherStatus String? @db.VarChar(10)
+  watcherReason String? @db.VarChar(300)
 
   // Relations
-  takenByUser        User              @relation(fields: [takenBy], references: [uuid], onUpdate: NoAction)
-  task               Task              @relation(fields: [taskId], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  scheduledJob      ScheduledJob?  @relation(fields: [scheduledJobId], references: [id], onDelete: SetNull, onUpdate: NoAction)
-  range              TaskPreferenceRange? @relation(fields: [rangeId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  takenByUser           User                 @relation(fields: [takenBy], references: [uuid], onUpdate: NoAction)
+  task                  Task                 @relation(fields: [taskId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  scheduledJob          ScheduledJob?        @relation(fields: [scheduledJobId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  range                 TaskPreferenceRange? @relation(fields: [rangeId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  sensorDevice          Device?              @relation("measurementSensorDevice", fields: [sensorDeviceId], references: [id], onDelete: SetNull)
+  channelSelectorDevice Device?              @relation("measurementChannelSelectorDevice", fields: [channelSelectorDeviceId], references: [id], onDelete: SetNull)
 
   measurementChannels MeasurementChannel[]
 
   @@index([data], map: "idx_measurements_data_gin", type: Gin)
   @@index([taskId, takenAt(sort: Desc)], map: "idx_measurements_task_taken")
+  @@index([sensorDeviceId, sensorId, takenAt(sort: Desc)], map: "idx_measurements_sensor_taken")
   @@map("measurements")
   @@schema("platform")
 }
 
 model Permission {
-  id                     String                   @id @db.VarChar(100)
+  id                     String                  @id @db.VarChar(100)
   description            String?
   rolePermissions        RolePermission[]
   userProjectPermissions UserProjectPermission[]
@@ -97,7 +109,6 @@ model Permission {
   @@map("permissions")
   @@schema("platform")
 }
-
 
 enum ProjectStatus {
   draft
@@ -112,13 +123,13 @@ enum ProjectStatus {
 }
 
 model Project {
-  uuid                   String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name                   String                   @db.VarChar(150)
-  description            String?                  @db.VarChar(500)
-  createdAt              DateTime?                @default(now()) @db.Timestamptz(6)
+  uuid                   String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name                   String                  @db.VarChar(150)
+  description            String?                 @db.VarChar(500)
+  createdAt              DateTime?               @default(now()) @db.Timestamptz(6)
   devices                Device[]
   tasks                  Task[]
-  status                 ProjectStatus            @default(draft)
+  status                 ProjectStatus           @default(draft)
   userProjectRoles       UserProjectRole[]
   userProjectPermissions UserProjectPermission[]
 
@@ -142,9 +153,9 @@ model UserProjectPermission {
 
 model RolePermission {
   roleId       Int
-  permissionId String      @db.VarChar(100)
-  permission   Permission  @relation(fields: [permissionId], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  role         Role        @relation(fields: [roleId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  permissionId String     @db.VarChar(100)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@id([roleId, permissionId])
   @@map("role_permissions")
@@ -152,10 +163,10 @@ model RolePermission {
 }
 
 model Role {
-  id                 Int                  @id @default(autoincrement())
-  name               String               @unique @db.VarChar(50)
-  rolePermissions    RolePermission[]
-  userProjectRoles   UserProjectRole[]
+  id               Int               @id @default(autoincrement())
+  name             String            @unique @db.VarChar(50)
+  rolePermissions  RolePermission[]
+  userProjectRoles UserProjectRole[]
 
   @@map("roles")
   @@schema("platform")
@@ -163,18 +174,18 @@ model Role {
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model TaskPreference {
-  id               Int       @id @default(autoincrement())
-  taskId           Int       @unique
-  name             String    @db.VarChar(100)
-  sensorDeviceId   String    @db.Uuid
-  channelSelectorDeviceId String? @db.Uuid
-  createdAt        DateTime? @default(now()) @db.Timestamptz(6)
-  updatedAt        DateTime? @updatedAt @db.Timestamptz(6)
+  id                      Int       @id @default(autoincrement())
+  taskId                  Int       @unique
+  name                    String    @db.VarChar(100)
+  sensorDeviceId          String    @db.Uuid
+  channelSelectorDeviceId String?   @db.Uuid
+  createdAt               DateTime? @default(now()) @db.Timestamptz(6)
+  updatedAt               DateTime? @updatedAt @db.Timestamptz(6)
 
-  sensorDevice     Device                @relation("sensorDevice", fields: [sensorDeviceId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  channelSelectorDevice Device?          @relation("channelSelectorDevice", fields: [channelSelectorDeviceId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  task             Task                  @relation(fields: [taskId], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  ranges           TaskPreferenceRange[]
+  sensorDevice          Device                @relation("sensorDevice", fields: [sensorDeviceId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  channelSelectorDevice Device?               @relation("channelSelectorDevice", fields: [channelSelectorDeviceId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  task                  Task                  @relation(fields: [taskId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  ranges                TaskPreferenceRange[]
 
   @@index([taskId, createdAt(sort: Desc)], map: "idx_task_preferences_task_created")
   @@map("task_preferences")
@@ -182,16 +193,16 @@ model TaskPreference {
 }
 
 model TaskPreferenceRange {
-  id               Int            @id @default(autoincrement())
+  id               Int     @id @default(autoincrement())
   taskPreferenceId Int
   order            Int
-  start            Decimal        @db.Decimal
-  stop             Decimal        @db.Decimal
-  points           Int            @default(801)
-  scale            String         @default("LIN") @db.VarChar(20)
+  start            Decimal @db.Decimal
+  stop             Decimal @db.Decimal
+  points           Int     @default(801)
+  scale            String  @default("LIN") @db.VarChar(20)
 
-  taskPreference   TaskPreference @relation(fields: [taskPreferenceId], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  measurements     Measurement[]
+  taskPreference TaskPreference @relation(fields: [taskPreferenceId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  measurements   Measurement[]
 
   @@unique([taskPreferenceId, order])
   @@map("task_preference_ranges")
@@ -200,17 +211,17 @@ model TaskPreferenceRange {
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model Task {
-  id              Int       @id @default(autoincrement())
-  name            String    @db.VarChar(150)
-  description     String?   @db.VarChar(500)
-  status          String?   @default("pending") @db.VarChar(50)
-  projectId       String    @db.Uuid
-  createdAt       DateTime? @default(now()) @db.Timestamptz(6)
+  id          Int       @id @default(autoincrement())
+  name        String    @db.VarChar(150)
+  description String?   @db.VarChar(500)
+  status      String?   @default("pending") @db.VarChar(50)
+  projectId   String    @db.Uuid
+  createdAt   DateTime? @default(now()) @db.Timestamptz(6)
 
   measurements    Measurement[]
   taskPreferences TaskPreference[]
   taskChannels    TaskChannel[]
-  project         Project   @relation(fields: [projectId], references: [uuid], onDelete: Cascade, onUpdate: NoAction)
+  project         Project          @relation(fields: [projectId], references: [uuid], onDelete: Cascade, onUpdate: NoAction)
   scheduledJobs   ScheduledJob[]
 
   @@map("tasks")
@@ -219,21 +230,21 @@ model Task {
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model TaskChannel {
-  id            Int       @id @default(autoincrement())
+  id            Int    @id @default(autoincrement())
   taskId        Int
   channelNumber Int
-  alias         String    @db.VarChar(100)
+  alias         String @db.VarChar(100)
 
   // metadata de la muestra física
-  concreteMix   Decimal?  @db.Decimal
-  hasEmulsifier Boolean?  @default(false)
-  notes         String?   @db.VarChar(500)
+  concreteMix   Decimal? @db.Decimal
+  hasEmulsifier Boolean? @default(false)
+  notes         String?  @db.VarChar(500)
   sampleAge     Int?
-  temperature   Decimal?  @db.Decimal
-  humidity      Decimal?  @db.Decimal
+  temperature   Decimal? @db.Decimal
+  humidity      Decimal? @db.Decimal
 
-  createdAt     DateTime? @default(now()) @db.Timestamptz(6)
-  updatedAt     DateTime? @updatedAt @db.Timestamptz(6)
+  createdAt DateTime? @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime? @updatedAt @db.Timestamptz(6)
 
   task Task @relation(fields: [taskId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
@@ -244,26 +255,26 @@ model TaskChannel {
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model MeasurementChannel {
-  id              Int       @id @default(autoincrement())
-  measurementId   Int
-  channelNumber   Int
+  id            Int @id @default(autoincrement())
+  measurementId Int
+  channelNumber Int
 
   // Snapshot del nick al momento de medir
-  channelAlias    String?   @db.VarChar(100)
+  channelAlias String? @db.VarChar(100)
 
   // Metadata del canal en esta medición
-  concreteMix     Decimal?  @db.Decimal
-  hasEmulsifier   Boolean?  @default(false)
-  notes           String?   @db.VarChar(500)
+  concreteMix   Decimal? @db.Decimal
+  hasEmulsifier Boolean? @default(false)
+  notes         String?  @db.VarChar(500)
 
   // Campos para ML futuro
-  sampleAge       Int?
-  temperature     Decimal?  @db.Decimal
-  humidity        Decimal?  @db.Decimal
+  sampleAge   Int?
+  temperature Decimal? @db.Decimal
+  humidity    Decimal? @db.Decimal
 
-  createdAt       DateTime? @default(now()) @db.Timestamptz(6)
+  createdAt DateTime? @default(now()) @db.Timestamptz(6)
 
-  measurement     Measurement @relation(fields: [measurementId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  measurement Measurement @relation(fields: [measurementId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@unique([measurementId, channelNumber])
   @@map("measurement_channels")
@@ -285,27 +296,26 @@ model UserProjectRole {
 }
 
 model User {
-  uuid             String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  email            String               @unique @db.VarChar(255)
-  name             String               @db.VarChar(100)
-  lastName         String?              @db.VarChar(100)
-  password         String?              @db.VarChar(255)
-  provider         String               @default("password")
-  emailVerified    Boolean              @default(false)
-  rejectionCount   Int                  @default(0)
-  banned           Boolean              @default(false)
-  createdAt        DateTime?            @default(now()) @db.Timestamptz(6)
-  passwordChangedAt DateTime?           @db.Timestamptz(6)
-  measurements     Measurement[]
-  userProjectRoles UserProjectRole[]
-  userProjectPermissions UserProjectPermission[]
-  scheduledJobs    ScheduledJob[]
-  teamMembers      TeamMember[]
+  uuid                    String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email                   String                   @unique @db.VarChar(255)
+  name                    String                   @db.VarChar(100)
+  lastName                String?                  @db.VarChar(100)
+  password                String?                  @db.VarChar(255)
+  provider                String                   @default("password")
+  emailVerified           Boolean                  @default(false)
+  rejectionCount          Int                      @default(0)
+  banned                  Boolean                  @default(false)
+  createdAt               DateTime?                @default(now()) @db.Timestamptz(6)
+  passwordChangedAt       DateTime?                @db.Timestamptz(6)
+  measurements            Measurement[]
+  userProjectRoles        UserProjectRole[]
+  userProjectPermissions  UserProjectPermission[]
+  scheduledJobs           ScheduledJob[]
+  teamMembers             TeamMember[]
   activityEventRecipients ActivityEventRecipient[]
+
   @@map("users")
   @@schema("platform")
-
-
 }
 
 model Team {
@@ -395,27 +405,28 @@ enum ScheduledJobStatus {
   completed
   failed
   cancelled
+
   @@schema("platform")
 }
 
 model ScheduledJob {
-  id               Int                @id @default(autoincrement())
-  taskId           Int
-  createdBy        String             @db.Uuid
-  label            String?            @db.VarChar(150)
+  id        Int     @id @default(autoincrement())
+  taskId    Int
+  createdBy String  @db.Uuid
+  label     String? @db.VarChar(150)
 
-  startAt          DateTime           @db.Timestamptz(6)
-  intervalMinutes  Int?               // null = one-shot
-  repeatCount      Int                @default(1)   // ejecuciones restantes (incluyendo esta)
-  executionIndex   Int                @default(1)   // posición en la cadena de repeticiones: 1, 2, 3...
+  startAt         DateTime @db.Timestamptz(6)
+  intervalMinutes Int? // null = one-shot
+  repeatCount     Int      @default(1) // ejecuciones restantes (incluyendo esta)
+  executionIndex  Int      @default(1) // posición en la cadena de repeticiones: 1, 2, 3...
 
-  status           ScheduledJobStatus @default(pending)
-  createdAt        DateTime?          @default(now()) @db.Timestamptz(6)
+  status    ScheduledJobStatus @default(pending)
+  createdAt DateTime?          @default(now()) @db.Timestamptz(6)
 
-  task          Task    @relation(fields: [taskId], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  createdByUser User    @relation(fields: [createdBy], references: [uuid], onDelete: Restrict, onUpdate: NoAction)
-  channelNumbers   Int[]   @default([])
-  measurements     Measurement[]
+  task           Task          @relation(fields: [taskId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  createdByUser  User          @relation(fields: [createdBy], references: [uuid], onDelete: Restrict, onUpdate: NoAction)
+  channelNumbers Int[]         @default([])
+  measurements   Measurement[]
 
   @@index([taskId, startAt(sort: Asc)], map: "idx_scheduled_jobs_task_start")
   @@map("scheduled_jobs")

@@ -82,6 +82,7 @@ describe('DevicesService (tipos por plugin)', () => {
     prisma.device.findFirst.mockResolvedValueOnce({ id: 'd2', name: 'Sim', type: 'sim-impedance', ip: null, status: 'online', projectId: 'p1' });
     prisma.measurement.findFirst.mockResolvedValueOnce({ takenAt: new Date('2026-10-20T10:00:00Z') });
     const out = await service.describeForUser('d2', 'u1');
+    expect(prisma.measurement.findFirst.mock.calls[0][0].where).toEqual({ sensorDeviceId: 'd2' });
     expect(out.role).toBe('sensor');
     expect(out.service.sensors[0].sensorValues[0].lastMeasured).toBe('2026-10-20T10:00:00.000Z');
   });

@@ -48,10 +48,10 @@ describe('MeasurementExecutor.measureTask (sensor + selector de canal)', () => {
       sensorPlugin, selectorPlugin, plugins: { sensor: sensorPlugin, selector: selectorPlugin },
       resolved: {
         preference: {
-          name: 'cfg', sensorDevice: { name: 'Sim', type: 'sim-impedance', ip: null },
-          channelSelectorDevice: withSelector ? { name: 'Mux', type: 'kronos-mux-16', ip: '10.0.0.2' } : null,
+          name: 'cfg', sensorDevice: { id: 'dev-s1', name: 'Sim', type: 'sim-impedance', ip: null },
+          channelSelectorDevice: withSelector ? { id: 'dev-m1', name: 'Mux', type: 'kronos-mux-16', ip: '10.0.0.2' } : null,
         },
-        sensor: { description: {}, context: sensorCtx },
+        sensor: { description: { sensors: [{ sensorId: 'sim-impedance-z' }] }, context: sensorCtx },
         selector: withSelector
           ? { description: {}, context: selectorCtx, actuatorId: 'kronos-mux-16-channel', valueName: 'channel' }
           : null,
@@ -76,7 +76,9 @@ describe('MeasurementExecutor.measureTask (sensor + selector de canal)', () => {
     expect(sensorPlugin.getSensorData).toHaveBeenCalledWith(sensorCtx, { kind: 'sweep', start: 1, stop: 2, points: 2, scale: 'LOG' });
     expect(drivers.sensor).toHaveBeenCalledWith('sim-impedance');
     expect(drivers.actuator).toHaveBeenCalledWith('kronos-mux-16');
-    expect(prisma.measurement.create.mock.calls[0][0].data).toMatchObject({ channelSelectorName: 'Mux', channelSelectorIp: '10.0.0.2', sensorDeviceName: 'Sim' });
+    expect(prisma.measurement.create.mock.calls[0][0].data).toMatchObject({ channelSelectorName: 'Mux', channelSelectorIp: '10.0.0.2', sensorDeviceName: 'Sim',
+      sensorDeviceId: 'dev-s1', sensorId: 'sim-impedance-z', channelSelectorDeviceId: 'dev-m1',
+    });
   });
 
   it('ledger: tras cada setActuatorData registra el canal en LiveValueStore si el modelo declara ese parámetro live', async () => {
@@ -130,7 +132,9 @@ describe('MeasurementExecutor.measureTask (sensor + selector de canal)', () => {
     await executor.measureTask(1, 'u1', { ranges, selectedChannels: [1] });
     expect(calls).toEqual(['get:1', 'get:3']);
     expect(sensorPlugin.getSensorData).toHaveBeenCalledTimes(2);
-    expect(prisma.measurement.create.mock.calls[0][0].data).toMatchObject({ channelSelectorName: null, channelSelectorIp: null });
+    expect(prisma.measurement.create.mock.calls[0][0].data).toMatchObject({
+      channelSelectorName: null, channelSelectorIp: null, channelSelectorDeviceId: null, sensorDeviceId: 'dev-s1', sensorId: 'sim-impedance-z',
+    });
   });
 
   it('rango fuera de los límites del sensor: falla antes de tocar el plugin, con el mismo mensaje', async () => {
@@ -155,10 +159,10 @@ describe('MeasurementExecutor.measureTask (sensor + selector de canal)', () => {
     };
     const resolved = {
       preference: {
-        name: 'cfg', sensorDevice: { name: 'Temp', type: 'sim-temperature', ip: null },
+        name: 'cfg', sensorDevice: { id: 'dev-t1', name: 'Temp', type: 'sim-temperature', ip: null },
         channelSelectorDevice: null,
       },
-      sensor: { description: {}, context: sensorCtx2 },
+      sensor: { description: { sensors: [{ sensorId: 'sim-temperature-th' }] }, context: sensorCtx2 },
       selector: null,
       channelRange: { min: 1, max: 1 },
       valueMetas: [{ name: 'temperature', unit: '°C' }, { name: 'humidity', unit: '%HR' }],
