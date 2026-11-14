@@ -1,14 +1,15 @@
 import 'reflect-metadata';
-import { Module } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
-
-// Placeholder: real worker bootstrap arrives in a later task.
-@Module({})
-class WorkerModule {}
+import { WorkerModule } from './worker.module';
 
 async function bootstrap() {
-  const app = await NestFactory.createApplicationContext(WorkerModule);
-  await app.init();
+  const app = await NestFactory.create(WorkerModule);
+  app.enableShutdownHooks();
+
+  const port = Number(process.env.HEALTH_PORT ?? 3001);
+  await app.listen(port);
+  Logger.log(`Worker health endpoint on port ${port}`, 'Bootstrap');
 }
 
 void bootstrap();

@@ -3,7 +3,12 @@ import { InjectQueue } from '@nestjs/bull';
 import type { Queue } from 'bull';
 import { PrismaService } from '@app/database';
 import { RealtimePublisher } from '@app/realtime';
-import { MEASUREMENTS_QUEUE, MeasurementJobData } from '@app/queue';
+import {
+  MEASUREMENTS_QUEUE,
+  MeasurementJobData,
+  PRIORITY_MANUAL,
+  PRIORITY_SCHEDULED,
+} from '@app/queue';
 import { MeasurementRange, estimateSeconds } from '@app/measurement';
 
 export interface AvailabilityResult {
@@ -20,9 +25,8 @@ export interface AvailabilityResult {
   nextScheduledAt?: Date;
 }
 
-// Prioridades Bull (menor = más prioritario): los jobs programados van primero
-export const PRIORITY_SCHEDULED = 1;
-export const PRIORITY_MANUAL = 10;
+// Prioridades Bull (menor = más prioritario): definidas en @app/queue, compartidas con el worker
+export { PRIORITY_SCHEDULED, PRIORITY_MANUAL };
 
 /**
  * Control de admisión de mediciones manuales.

@@ -4,13 +4,16 @@ import { InjectQueue } from '@nestjs/bull';
 import type { Queue } from 'bull';
 import { PrismaService } from '@app/database';
 import { RealtimePublisher } from '@app/realtime';
-import { MEASUREMENTS_QUEUE, MeasurementJobData } from '@app/queue';
-import { MeasurementRange } from '@app/measurement';
-import { MeasurementSchedulingService, PRIORITY_SCHEDULED } from './scheduling.service';
+import { RedisLockService } from '@app/redis';
+import { MEASUREMENTS_QUEUE, MeasurementJobData, PRIORITY_SCHEDULED } from '@app/queue';
+import { MeasurementRange, estimateSeconds } from '@app/measurement';
+
+/** TTL del liderazgo del cron; no se libera al terminar (el TTL cierra el turno del minuto). */
+const LEADER_TTL_MS = 55_000;
 
 /**
  * Cron que despacha los ScheduledJobs pendientes.
- * Corre cada minuto:
+ * Corre cada minuto, solo en la réplica que obtiene el liderazgo (lock Redis 'scheduler'):
  *  1. Busca jobs 'pending' con startAt <= ahora
  *  2. Salta los que usan un dispositivo (analyzer/mux) ya ocupado por un job 'running'
  *  3. Publica cada job en la cola Bull 'measurements' con prioridad alta
@@ -25,8 +28,8 @@ export class SchedulerService {
 
   constructor(
     private prisma: PrismaService,
-    private schedulingService: MeasurementSchedulingService,
     private realtime: RealtimePublisher,
+    private lockService: RedisLockService,
     @InjectQueue(MEASUREMENTS_QUEUE)
     private measurementQueue: Queue<MeasurementJobData>,
   ) {}
@@ -37,28 +40,32 @@ export class SchedulerService {
     this.ticking = true;
 
     try {
-      const now = new Date();
-
-      // 1. Jobs pendientes cuyo startAt ya venció
-      const dueJobs = await this.prisma.scheduledJob.findMany({
-        where: { status: 'pending', startAt: { lte: now } },
-        orderBy: { startAt: 'asc' },
-      });
-
-      if (dueJobs.length === 0) return;
-
-      this.logger.log(`${dueJobs.length} scheduled job(s) due`);
-
-      // 2. Dispositivos ocupados por jobs actualmente en ejecución
-      const busyDevices = await this.getBusyDeviceIds();
-
-      for (const job of dueJobs) {
-        await this.dispatchJob(job, now, busyDevices);
-      }
+      await this.lockService.runAsLeader('scheduler', LEADER_TTL_MS, () => this.tick());
     } catch (error) {
       this.logger.error(`Scheduler tick failed: ${error.message}`);
     } finally {
       this.ticking = false;
+    }
+  }
+
+  private async tick(): Promise<void> {
+    const now = new Date();
+
+    // 1. Jobs pendientes cuyo startAt ya venció
+    const dueJobs = await this.prisma.scheduledJob.findMany({
+      where: { status: 'pending', startAt: { lte: now } },
+      orderBy: { startAt: 'asc' },
+    });
+
+    if (dueJobs.length === 0) return;
+
+    this.logger.log(`${dueJobs.length} scheduled job(s) due`);
+
+    // 2. Dispositivos ocupados por jobs actualmente en ejecución
+    const busyDevices = await this.getBusyDeviceIds();
+
+    for (const job of dueJobs) {
+      await this.dispatchJob(job, now, busyDevices);
     }
   }
 
@@ -148,10 +155,7 @@ export class SchedulerService {
       ranges,
       selectedChannels: job.channelNumbers,
       jobId: `scheduled-${job.id}`,
-      estimatedSeconds: this.schedulingService.estimateSeconds(
-        ranges,
-        job.channelNumbers.length,
-      ),
+      estimatedSeconds: estimateSeconds(ranges, job.channelNumbers.length),
       scheduledJobId: job.id,
       executionIndex: job.executionIndex,
     };

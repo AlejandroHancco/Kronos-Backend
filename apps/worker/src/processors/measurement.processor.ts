@@ -4,12 +4,14 @@ import type { Job } from 'bull';
 import { PrismaService } from '@app/database';
 import { MeasurementExecutor } from '@app/measurement';
 import { RealtimePublisher } from '@app/realtime';
+import { RedisLockService } from '@app/redis';
 import { MEASUREMENTS_QUEUE, MeasurementJobData } from '@app/queue';
 
 /**
  * Procesador de la cola 'measurements'.
  * Concurrencia 1 (default de Bull): el MUX/analyzer solo soporta
  * una medición a la vez — nunca subir la concurrencia de este processor.
+ * Entre réplicas del worker, la exclusividad la dan los locks Redis por dispositivo.
  *
  * Reintentos: configurados al publicar el job (attempts: 3, backoff exponencial).
  */
@@ -21,6 +23,7 @@ export class MeasurementProcessor {
     private readonly measurementExecutor: MeasurementExecutor,
     private readonly realtime: RealtimePublisher,
     private readonly prisma: PrismaService,
+    private readonly lockService: RedisLockService,
   ) {}
 
   @Process('execute')
@@ -41,13 +44,28 @@ export class MeasurementProcessor {
 
     // Ejecuta la medición vía TCP (SCPI Hioki + MUX HTTP), guarda en DB
     // y emite measurement:complete a la sala de la tarea (dentro de measureTask).
-    const result = await this.measurementExecutor.measureTask(taskId, userId, {
-      ranges,
-      selectedChannels,
-      jobId,
-      scheduledJobId,
-      executionIndex,
+    const measure = () =>
+      this.measurementExecutor.measureTask(taskId, userId, {
+        ranges,
+        selectedChannels,
+        jobId,
+        scheduledJobId,
+        executionIndex,
+      });
+
+    // Exclusividad entre réplicas: lock Redis sobre el MUX y el analyzer de la
+    // preferencia activa. Sin preferencia, measureTask falla con su propio error.
+    const preference = await this.prisma.taskPreference.findFirst({
+      where: { taskId },
+      orderBy: { createdAt: 'desc' },
+      select: { analyzerDeviceId: true, muxDeviceId: true },
     });
+    const result = preference
+      ? await this.lockService.withDeviceLocks(
+          [preference.muxDeviceId, preference.analyzerDeviceId],
+          measure,
+        )
+      : await measure();
 
     // Si vino de un ScheduledJob, marcarlo como completado
     if (scheduledJobId) {

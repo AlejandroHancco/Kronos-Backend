@@ -58,7 +58,7 @@ import { RlsMiddleware } from './prisma/prisma.middleware';
     TaskChannelsModule,
     MeasurementChannelsModule,
     ScheduledJobsModule,
-    // Orquestación de mediciones: cron de ScheduledJobs + control de admisión
+    // Control de admisión de mediciones (el cron de ScheduledJobs vive en el worker)
     SchedulerModule,
     PermissionsModule,
     NotificationsModule,
