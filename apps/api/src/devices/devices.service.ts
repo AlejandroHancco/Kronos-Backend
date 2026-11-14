@@ -6,7 +6,7 @@ import { UpdateDeviceDto } from './dto/update-device.dto';
 import { UpdateDeviceStatusDto } from './dto/update-device-status.dto';
 import { TestConnectionDto } from './dto/test-connection.dto';
 import { InjectQueue } from '@nestjs/bull';
-import type { Queue } from 'bull';
+import type { Job, Queue } from 'bull';
 import { DEVICE_OPS_QUEUE, TestConnectionJobData } from '@app/queue';
 
 @Injectable()
@@ -150,33 +150,112 @@ export class DevicesService {
    * La API no abre sockets hacia el laboratorio: delega el chequeo en el worker
    * vía la cola 'device-ops'. Cualquier fallo (Redis caído, timeout) cuenta como
    * "no alcanzable".
+   *
+   * No usa Job.finished(): deja listeners globales y un sondeo cada 5 s vivos
+   * hasta que el job termina (nunca, si se elimina tras el timeout). Aquí los
+   * listeners son propios y se quitan siempre en el finally.
    */
   private async runTestConnectionJob(type: string, ip: string, port: number): Promise<boolean> {
     const timeoutMs = Number(process.env.DEVICE_TEST_TIMEOUT_MS) || 5000;
-    let job: Awaited<ReturnType<Queue<TestConnectionJobData>['add']>> | undefined;
-    let timer: NodeJS.Timeout | undefined;
+    let job: Job<TestConnectionJobData>;
     try {
       job = await this.deviceOpsQueue.add(
         'test-connection',
         { type, ip, port },
-        { attempts: 1, removeOnComplete: true, removeOnFail: true },
+        // Se conserva el resultado unos segundos para poder leerlo por estado
+        // si el evento global llega antes de suscribirse (o se pierde).
+        { attempts: 1, removeOnComplete: { age: 60 }, removeOnFail: { age: 60 } },
       );
-      const timeout = new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error(`timeout tras ${timeoutMs}ms`)), timeoutMs);
-      });
-      return Boolean(await Promise.race([job.finished(), timeout]));
     } catch (err) {
       this.logger.warn(`test-connection ${type} ${ip}:${port} falló: ${(err as Error).message}`);
-      if (job) {
-        try {
-          await job.remove();
-        } catch {
-          // best-effort
-        }
-      }
       return false;
-    } finally {
-      if (timer) clearTimeout(timer);
+    }
+
+    try {
+      return await this.waitForJobResult(job, timeoutMs);
+    } catch (err) {
+      this.logger.warn(`test-connection ${type} ${ip}:${port} falló: ${(err as Error).message}`);
+      return false;
     }
   }
+
+  private async waitForJobResult(job: Job<TestConnectionJobData>, timeoutMs: number): Promise<boolean> {
+    const queue = this.deviceOpsQueue;
+    const jobId = String(job.id);
+    let timer: NodeJS.Timeout | undefined;
+    let onCompleted: ((id: unknown, result: unknown) => void) | undefined;
+    let onFailed: ((id: unknown, reason: unknown) => void) | undefined;
+
+    try {
+      return await new Promise<boolean>((resolve, reject) => {
+        onCompleted = (id, result) => {
+          if (String(id) === jobId) resolve(parseJobResult(result));
+        };
+        onFailed = (id, reason) => {
+          if (String(id) === jobId) reject(new Error(String(reason)));
+        };
+        queue.on('global:completed', onCompleted);
+        queue.on('global:failed', onFailed);
+
+        timer = setTimeout(() => {
+          // Último chequeo por estado antes de dar el test por fallido.
+          this.settleOnTimeout(job, timeoutMs).then(resolve, reject);
+        }, timeoutMs);
+
+        // Cierra la carrera: el job pudo terminar antes de suscribirse.
+        this.readFinishedResult(job).then(
+          (finished) => {
+            if (!finished) return;
+            if (finished.ok) resolve(finished.value);
+            else reject(new Error(finished.reason));
+          },
+          () => undefined, // el timeout decide
+        );
+      });
+    } finally {
+      if (timer) clearTimeout(timer);
+      if (onCompleted) queue.removeListener('global:completed', onCompleted);
+      if (onFailed) queue.removeListener('global:failed', onFailed);
+    }
+  }
+
+  private async readFinishedResult(
+    job: Job<TestConnectionJobData>,
+  ): Promise<{ ok: true; value: boolean } | { ok: false; reason: string } | undefined> {
+    const state = await job.getState();
+    if (state !== 'completed' && state !== 'failed') return undefined;
+    const fresh = (await this.deviceOpsQueue.getJob(job.id)) ?? job;
+    if (state === 'completed') return { ok: true, value: Boolean(fresh.returnvalue) };
+    return { ok: false, reason: fresh.failedReason ?? 'job failed' };
+  }
+
+  private async settleOnTimeout(job: Job<TestConnectionJobData>, timeoutMs: number): Promise<boolean> {
+    const state = await job.getState();
+    if (state === 'completed' || state === 'failed') {
+      const finished = await this.readFinishedResult(job);
+      if (finished?.ok) return finished.value;
+      throw new Error(finished?.reason ?? 'job failed');
+    }
+    // Solo se retira si nadie lo ha tomado; si está activo, el worker lo termina
+    // y removeOnComplete/removeOnFail lo limpian.
+    if (state === 'waiting' || state === 'delayed' || state === 'paused') {
+      try {
+        await job.remove();
+      } catch {
+        // best-effort
+      }
+    }
+    throw new Error(`timeout tras ${timeoutMs}ms (estado: ${state})`);
+  }
+}
+
+function parseJobResult(result: unknown): boolean {
+  if (typeof result === 'string') {
+    try {
+      return Boolean(JSON.parse(result));
+    } catch {
+      return false;
+    }
+  }
+  return Boolean(result);
 }
