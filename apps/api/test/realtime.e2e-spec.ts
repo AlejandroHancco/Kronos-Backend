@@ -1,4 +1,3 @@
-import { Server as HttpServer } from 'http';
 import { AddressInfo } from 'net';
 import { io as ioClient, Socket as ClientSocket } from 'socket.io-client';
 import { Test } from '@nestjs/testing';
@@ -12,6 +11,7 @@ class TestKronosGateway {
   @SubscribeMessage('join')
   join(@ConnectedSocket() socket: any, @MessageBody() userId: string) {
     socket.join(`user:${userId}`);
+    return { joined: `user:${userId}` }; // ack: el cliente sabe que ya está en la sala
   }
 }
 
@@ -19,11 +19,11 @@ const redisUrl = process.env.REDIS_URL;
 const maybe = redisUrl ? describe : describe.skip;
 
 maybe('realtime: publisher -> redis -> socket.io (two servers)', () => {
-  let appA: INestApplication;
-  let appB: INestApplication;
-  let client: ClientSocket;
+  // Todo lo que se crea se registra aquí y se cierra en afterAll, aunque beforeAll falle a medias.
+  const apps: INestApplication[] = [];
+  let client: ClientSocket | undefined;
   let publisher: RealtimePublisher;
-  const servers: HttpServer[] = [];
+  let appB: INestApplication;
 
   async function boot(withPublisher: boolean) {
     const mod = await Test.createTestingModule({
@@ -31,35 +31,46 @@ maybe('realtime: publisher -> redis -> socket.io (two servers)', () => {
       providers: [TestKronosGateway],
     }).compile();
     const app = mod.createNestApplication();
+    apps.push(app);
     app.useWebSocketAdapter(new RedisIoAdapter(app));
     await app.listen(0);
     return app;
   }
 
   beforeAll(async () => {
-    appA = await boot(true);
+    const appA = await boot(true);
     appB = await boot(false);
     publisher = appA.get(RealtimePublisher);
     const port = (appB.getHttpServer().address() as AddressInfo).port;
     client = ioClient(`http://localhost:${port}/kronos`, { transports: ['websocket'] });
-    await new Promise<void>((res) => client.on('connect', () => res()));
-    client.emit('join', 'u1');
-    await new Promise((r) => setTimeout(r, 300));
+    await new Promise<void>((res) => client!.on('connect', () => res()));
+    // Espera el ack del join en lugar de dormir un tiempo fijo.
+    await expect(client.timeout(2000).emitWithAck('join', 'u1')).resolves.toEqual({ joined: 'user:u1' });
   });
 
   afterAll(async () => {
     client?.close();
-    await appA?.close();
-    await appB?.close();
-    servers.forEach((s) => s.close());
+    // app.close() cierra también el servidor HTTP y el de Socket.io (y sus clientes Redis).
+    await Promise.allSettled(apps.map((app) => app.close()));
   });
 
   it('delivers job:status published from server A to a client on server B', async () => {
-    const received = new Promise((resolve, reject) => {
-      client.on('job:status', resolve);
-      setTimeout(() => reject(new Error('timeout')), 2000);
-    });
-    publisher.jobStatus('u1', { jobId: 'j1', status: 'queued' });
-    await expect(received).resolves.toEqual({ jobId: 'j1', status: 'queued' });
+    // La suscripción Redis del adapter de B puede tardar en estar lista:
+    // se reintenta el publish hasta recibir el evento (o agotar el plazo).
+    const received = new Promise((resolve) => client!.once('job:status', resolve));
+    let retry: NodeJS.Timeout | undefined;
+    let deadline: NodeJS.Timeout | undefined;
+    const publish = () => publisher.jobStatus('u1', { jobId: 'j1', status: 'queued' });
+    try {
+      publish();
+      retry = setInterval(publish, 100);
+      const timeout = new Promise((_, reject) => {
+        deadline = setTimeout(() => reject(new Error('timeout waiting for job:status')), 3000);
+      });
+      await expect(Promise.race([received, timeout])).resolves.toEqual({ jobId: 'j1', status: 'queued' });
+    } finally {
+      clearInterval(retry);
+      clearTimeout(deadline);
+    }
   });
 });
