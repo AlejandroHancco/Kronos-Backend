@@ -23,10 +23,10 @@ import { SearchModule } from './search/search.module';
 import { ReportsModule } from './reports/reports.module';
 import { DevicePluginsModule } from './device-plugins/device-plugins.module';
 import { GatewayModule } from './gateway/gateway.module';
-import { RedisModule } from './redis/redis.module';
-import { CommonModule } from './common/common.module';
+import { RedisModule } from '@app/redis';
+import { CommonModule } from '@app/common';
 import { RlsMiddleware } from './prisma/prisma.middleware';
-import { PrismaModule } from './prisma/prisma.module';
+import { PrismaModule } from '@app/database';
 
 @Module({
   imports: [

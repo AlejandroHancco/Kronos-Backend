@@ -1,8 +1,8 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import type { Response } from 'express';
-import { PrismaService } from '../prisma/prisma.service';
-import { TeamScopeService } from '../common/team-scope.service';
+import { PrismaService } from '@app/database';
+import { TeamScopeService } from '@app/common';
 import { parseAcquisitionSnapshot, parseSensorValues, storedPointsOf } from '../measurements/measurement-data';
 import { loadSingleReadings, singleReadingFields } from '../measurements/single-readings';
 import {

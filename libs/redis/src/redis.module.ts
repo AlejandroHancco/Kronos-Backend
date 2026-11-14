@@ -1,20 +1,20 @@
 import { Global, Module, Logger, Provider } from '@nestjs/common';
 import Redis from 'ioredis';
+import { REDIS_CLIENT } from './redis.constants';
+import { RedisLockService } from './redis-lock.service';
 
-export const REDIS_CLIENT = 'REDIS_CLIENT';
+export { REDIS_CLIENT };
 
 /**
- * Cliente ioredis compartido (caché de permisos, health check).
- * Si REDIS_URL no está configurado, provee null y los consumidores
- * hacen fallback (caché en memoria / health 'not_configured').
+ * Cliente ioredis compartido (caché de permisos, health check, colas).
+ * REDIS_URL es obligatorio: si falta, el arranque falla.
  */
 const redisProvider: Provider = {
   provide: REDIS_CLIENT,
-  useFactory: (): Redis | null => {
+  useFactory: (): Redis => {
     const url = process.env.REDIS_URL;
     if (!url) {
-      Logger.warn('REDIS_URL no configurado — caché de permisos en memoria', 'RedisModule');
-      return null;
+      throw new Error('REDIS_URL is required');
     }
 
     const client = new Redis(url, {
@@ -32,7 +32,7 @@ const redisProvider: Provider = {
 
 @Global()
 @Module({
-  providers: [redisProvider],
-  exports: [redisProvider],
+  providers: [redisProvider, RedisLockService],
+  exports: [redisProvider, RedisLockService],
 })
 export class RedisModule {}

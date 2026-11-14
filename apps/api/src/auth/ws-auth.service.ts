@@ -1,6 +1,6 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService, TokenExpiredError } from '@nestjs/jwt';
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaService } from '@app/database';
 import { NormalizedUser } from './interfaces/auth.interface';
 import { SupabaseStrategy } from './supabase.strategy';
 import { assertJwtUserActive } from './jwt-user';

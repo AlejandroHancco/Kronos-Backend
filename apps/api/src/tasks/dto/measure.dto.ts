@@ -1,6 +1,6 @@
 import { IsIn, IsInt, IsOptional, IsString, IsArray, Min, Max, IsNumber, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
-import { IsGreaterThan } from '../../common/validators/is-greater-than.decorator';
+import { IsGreaterThan } from '@app/common';
 
 /** Un rango de barrido sobre la variable que declara el sensor (límites por dispositivo: B3). */
 export class SweepRangeDto {

@@ -10,7 +10,7 @@ import {
     Query,
     Request,
 } from '@nestjs/common';
-import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { CurrentUser, RequirePermission } from '@app/common';
 import type { NormalizedUser } from '../auth/interfaces/auth.interface';
 import { ProjectsService } from './projects.service';
 import { TasksService } from '../tasks/tasks.service';
@@ -24,7 +24,6 @@ import { CreateDeviceDto } from '../devices/dto/create-device.dto';
 import { UpdateDeviceDto } from '../devices/dto/update-device.dto';
 import { CombinedAuthGuard } from '../auth/combined-auth.guard';
 import { PermissionGuard } from '../auth/guards/permission.guard';
-import { RequirePermission } from '../common/decorators/require-permission.decorator';
 
 @Controller('projects')
 @UseGuards(CombinedAuthGuard, PermissionGuard)

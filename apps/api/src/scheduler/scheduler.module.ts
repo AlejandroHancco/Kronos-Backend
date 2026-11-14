@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
-import { PrismaModule } from '../prisma/prisma.module';
+import { PrismaModule } from '@app/database';
 import { QueueModule } from '../queue/queue.module';
 import { isQueueEnabled } from '../queue/queue.constants';
 import { MeasurementsModule } from '../measurements/measurements.module';

@@ -1,7 +1,7 @@
 import { HttpException, HttpStatus, Injectable, NotFoundException } from '@nestjs/common';
 import { Device, Prisma, TaskPreference } from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
-import { TeamScopeService } from '../common/team-scope.service';
+import { PrismaService } from '@app/database';
+import { TeamScopeService } from '@app/common';
 import { ExperimentConfigService, toSweepRanges } from '../device-plugins/core/experiment-config.service';
 import { invalidChannels } from '../device-plugins/core/experiment-config';
 import { SweepRange } from '../device-plugins/core/acquisition';

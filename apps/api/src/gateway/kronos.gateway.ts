@@ -13,8 +13,7 @@ import { ForbiddenException, Injectable, Logger, OnModuleDestroy } from '@nestjs
 import { WsAuthService } from '../auth/ws-auth.service';
 import { getSocketUser, socketAuthMiddleware, WS_AUTH_ERROR } from '../auth/ws-socket';
 import { PASSWORD_CHANGED_MESSAGE } from '../auth/jwt-user';
-import { TeamScopeService } from '../common/team-scope.service';
-import { SessionEventsService } from '../common/session-events.service';
+import { TeamScopeService, SessionEventsService } from '@app/common';
 
 export interface JobStatusPayload {
   jobId: string;

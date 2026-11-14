@@ -1,7 +1,7 @@
-import { ForbiddenException, Inject, Injectable, Logger, Optional } from '@nestjs/common';
+import { ForbiddenException, Inject, Injectable, Logger } from '@nestjs/common';
 import Redis from 'ioredis';
-import { PrismaService } from '../prisma/prisma.service';
-import { REDIS_CLIENT } from '../redis/redis.module';
+import { PrismaService } from '@app/database';
+import { REDIS_CLIENT } from '@app/redis';
 
 // Fallback en memoria (por rol) cuando Redis no está disponible
 const rolePermissionCache = new Map<number, { permissions: string[]; expiresAt: number }>();
@@ -16,7 +16,7 @@ export class PermissionsService {
 
   constructor(
     private prisma: PrismaService,
-    @Optional() @Inject(REDIS_CLIENT) private redis: Redis | null,
+    @Inject(REDIS_CLIENT) private redis: Redis,
   ) {}
 
   private userCacheKey(userId: string, projectId?: string): string {
@@ -41,28 +41,24 @@ export class PermissionsService {
 
   /**
    * Permisos efectivos de un usuario (con caché en Redis, TTL 300s).
-   * Fallback a DB + caché en memoria por rol si Redis no está disponible.
+   * Si Redis falla, degrada a DB + caché en memoria por rol.
    */
   async getUserPermissions(userId: string, projectId?: string): Promise<string[]> {
     const cacheKey = this.userCacheKey(userId, projectId);
 
-    if (this.redis) {
-      try {
-        const cached = await this.redis.get(cacheKey);
-        if (cached) return JSON.parse(cached);
-      } catch (err) {
-        this.logger.warn(`Redis GET failed (${err.message}) — leyendo de DB`);
-      }
+    try {
+      const cached = await this.redis.get(cacheKey);
+      if (cached) return JSON.parse(cached);
+    } catch (err) {
+      this.logger.warn(`Redis GET failed (${err.message}) — leyendo de DB`);
     }
 
     const permissions = await this.getPermissionsFromDB(userId, projectId);
 
-    if (this.redis) {
-      try {
-        await this.redis.setex(cacheKey, REDIS_PERMISSIONS_TTL, JSON.stringify(permissions));
-      } catch (err) {
-        this.logger.warn(`Redis SETEX failed: ${err.message}`);
-      }
+    try {
+      await this.redis.setex(cacheKey, REDIS_PERMISSIONS_TTL, JSON.stringify(permissions));
+    } catch (err) {
+      this.logger.warn(`Redis SETEX failed: ${err.message}`);
     }
 
     return permissions;
@@ -265,7 +261,6 @@ export class PermissionsService {
    * Llamar cuando cambia su rol (aprobación, cambio de rol de equipo/proyecto).
    */
   async invalidateUserCache(userId: string): Promise<void> {
-    if (!this.redis) return;
     try {
       const keys = await this.redis.keys(`permissions:${userId}:*`);
       if (keys.length > 0) {
@@ -282,7 +277,6 @@ export class PermissionsService {
 
   /** Al editar los permisos de un rol se invalida el caché de todos los usuarios */
   private async invalidateAllUserCaches(): Promise<void> {
-    if (!this.redis) return;
     try {
       const keys = await this.redis.keys('permissions:*');
       if (keys.length > 0) {

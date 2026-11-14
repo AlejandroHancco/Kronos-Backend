@@ -13,8 +13,7 @@ import { CreateMeasurementDto } from './dto/create-measurement.dto';
 import { UpdateMeasurementChannelDto } from './dto/update-measurement-channel.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { PermissionGuard } from '../auth/guards/permission.guard';
-import { RequirePermission } from '../common/decorators/require-permission.decorator';
-import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { RequirePermission, CurrentUser } from '@app/common';
 import type { NormalizedUser } from '../auth/interfaces/auth.interface';
 
 @Controller('measurements')

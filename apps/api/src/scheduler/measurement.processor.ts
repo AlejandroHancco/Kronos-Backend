@@ -1,7 +1,7 @@
 import { Logger } from '@nestjs/common';
 import { Processor, Process, OnQueueFailed } from '@nestjs/bull';
 import type { Job } from 'bull';
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaService } from '@app/database';
 import { MeasurementsService } from '../measurements/measurements.service';
 import { KronosGateway } from '../gateway/kronos.gateway';
 import { MEASUREMENTS_QUEUE } from '../queue/queue.constants';

@@ -1,7 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { Injectable, HttpException, HttpStatus, Logger, BadRequestException } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
-import { TeamScopeService } from '../common/team-scope.service';
+import { PrismaService } from '@app/database';
+import { TeamScopeService } from '@app/common';
 import { MeasurementsGateway } from './measurements.gateway';
 import { KronosGateway } from '../gateway/kronos.gateway';
 import { NotificationsService } from '../notifications/notifications.service';

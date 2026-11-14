@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
-import { TeamScopeService } from '../common/team-scope.service';
+import { PrismaService } from '@app/database';
+import { TeamScopeService } from '@app/common';
 import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()

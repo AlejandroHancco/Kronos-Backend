@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TaskChannelsService } from './task-channels.service';
 import { TaskChannelsController } from './task-channels.controller';
-import { PrismaModule } from '../prisma/prisma.module';
+import { PrismaModule } from '@app/database';
 
 @Module({
   imports: [PrismaModule],

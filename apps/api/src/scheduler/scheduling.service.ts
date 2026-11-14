@@ -1,7 +1,7 @@
 import { ConflictException, Injectable, Logger, Optional } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bull';
 import type { Queue } from 'bull';
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaService } from '@app/database';
 import { MeasurementsService } from '../measurements/measurements.service';
 import type { AcquisitionMetadata, SweepRange } from '../device-plugins/core/acquisition';
 import { estimateAcquisitionSeconds } from '../device-plugins/core/acquisition';

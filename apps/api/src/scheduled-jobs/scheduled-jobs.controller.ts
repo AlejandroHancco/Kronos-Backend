@@ -12,7 +12,7 @@ import { ScheduledJobsService } from './scheduled-jobs.service';
 import { CreateScheduledJobDto } from './dto/create-scheduled-job.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { PermissionGuard } from '../auth/guards/permission.guard';
-import { RequirePermission } from '../common/decorators/require-permission.decorator';
+import { RequirePermission } from '@app/common';
 
 @Controller('scheduled-jobs')
 @UseGuards(JwtAuthGuard, PermissionGuard)

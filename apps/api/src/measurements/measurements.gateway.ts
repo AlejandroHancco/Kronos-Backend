@@ -12,7 +12,7 @@ import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { WsAuthService } from '../auth/ws-auth.service';
 import { getSocketUser, socketAuthMiddleware, WS_AUTH_ERROR } from '../auth/ws-socket';
 import { PASSWORD_CHANGED_MESSAGE } from '../auth/jwt-user';
-import { SessionEventsService } from '../common/session-events.service';
+import { SessionEventsService } from '@app/common';
 import type { MeasurementValueMeta, StoredMeasurementPoint } from './measurement-data';
 import type { AcquisitionSnapshot } from '../device-plugins/core/acquisition';
 

@@ -1,4 +1,4 @@
-import type { PrismaService } from '../prisma/prisma.service';
+import type { PrismaService } from '@app/database';
 
 /** Dispositivos que ocupa una configuración de tarea; el MUX es opcional (null = sin MUX). */
 export interface PrefDevices { sensorDeviceId: string; channelSelectorDeviceId: string | null }

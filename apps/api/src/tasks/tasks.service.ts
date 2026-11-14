@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
-import { TeamScopeService } from '../common/team-scope.service';
+import { PrismaService } from '@app/database';
+import { TeamScopeService } from '@app/common';
 import { MeasurementSchedulingService } from '../scheduler/scheduling.service';
 import { ExperimentConfigService } from '../device-plugins/core/experiment-config.service';
 import { CreateTaskDto } from './dto/create-task.dto';

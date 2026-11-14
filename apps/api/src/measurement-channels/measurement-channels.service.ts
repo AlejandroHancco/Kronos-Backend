@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaService } from '@app/database';
 import { UpdateMeasurementChannelDto } from './dto/update-measurement-channel.dto';
 import { MeasurementChannelResponse } from './measurement-channels.types';
 

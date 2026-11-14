@@ -1,4 +1,4 @@
-import type { PrismaService } from '../prisma/prisma.service';
+import type { PrismaService } from '@app/database';
 import type { AcquisitionSnapshot } from '../device-plugins/core/acquisition';
 import { parseSensorValues, storedPointsOf, type MeasurementValueMeta, type StoredMeasurementPoint } from './measurement-data';
 

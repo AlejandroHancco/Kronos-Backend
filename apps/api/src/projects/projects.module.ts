@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ProjectsService } from './projects.service';
 import { ProjectsController } from './projects.controller';
-import { PrismaModule } from '../prisma/prisma.module';
+import { PrismaModule } from '@app/database';
 import { TasksService } from '../tasks/tasks.service';
 import { SchedulerModule } from '../scheduler/scheduler.module';
 import { DevicesModule } from '../devices/devices.module';

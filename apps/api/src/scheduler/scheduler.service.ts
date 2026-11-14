@@ -2,7 +2,7 @@ import { Injectable, Logger, Optional } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectQueue } from '@nestjs/bull';
 import type { Queue } from 'bull';
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaService } from '@app/database';
 import { MeasurementsService } from '../measurements/measurements.service';
 import { ExperimentConfigService } from '../device-plugins/core/experiment-config.service';
 import { KronosGateway } from '../gateway/kronos.gateway';

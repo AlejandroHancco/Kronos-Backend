@@ -18,8 +18,7 @@ import { TestConnectionDto } from './dto/test-connection.dto';
 import { SetDeviceConfigurationDto } from './dto/set-device-configuration.dto';
 import { CombinedAuthGuard } from '../auth/combined-auth.guard';
 import { PermissionGuard } from '../auth/guards/permission.guard';
-import { RequirePermission } from '../common/decorators/require-permission.decorator';
-import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { RequirePermission, CurrentUser } from '@app/common';
 import type { NormalizedUser } from '../auth/interfaces/auth.interface';
 
 @UseGuards(CombinedAuthGuard, PermissionGuard)

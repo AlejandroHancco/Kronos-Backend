@@ -1,6 +1,6 @@
 import { BadGatewayException, BadRequestException, Injectable } from '@nestjs/common';
 import { Device, Prisma } from '@prisma/client';
-import { PrismaService } from '../../prisma/prisma.service';
+import { PrismaService } from '@app/database';
 import { DevicePluginRegistry } from './device-plugin.registry';
 import { DeviceActivityService } from './device-activity.service';
 import type { ConfigurationParameterMetadata, ConfigurationValue, ConfigurationValues } from './device-plugin.interface';

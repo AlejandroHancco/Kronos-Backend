@@ -1,5 +1,5 @@
 import { UnauthorizedException } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaService } from '@app/database';
 import { NormalizedUser } from './interfaces/auth.interface';
 
 export const PASSWORD_CHANGED_MESSAGE = 'La sesión fue cerrada por un cambio de contraseña';

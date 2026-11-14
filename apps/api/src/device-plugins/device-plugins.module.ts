@@ -4,14 +4,14 @@ import { DevicePlugin } from './core/device-plugin.interface';
 import { DEVICE_PLUGIN_INSTANCES } from './core/device-plugin.tokens';
 import { DEVICE_PLUGINS } from './plugins';
 import { DevicePluginsController } from './device-plugins.controller';
-import { PrismaModule } from '../prisma/prisma.module';
+import { PrismaModule } from '@app/database';
 import { PermissionsModule } from '../permissions/permissions.module';
 import { ExperimentConfigService } from './core/experiment-config.service';
 import { ExperimentCatalogService } from './core/experiment-catalog.service';
 import { DeviceActivityService } from './core/device-activity.service';
 import { DeviceConfigurationService } from './core/device-configuration.service';
 import { ExperimentsController, ProjectExperimentsController } from './core/experiments.controller';
-import { CommonModule } from '../common/common.module';
+import { CommonModule } from '@app/common';
 
 /**
  * Módulo del Kronos Watcher dedicado a dispositivos: registra los plugins de cada
