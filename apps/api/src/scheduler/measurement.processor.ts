@@ -2,10 +2,9 @@ import { Logger } from '@nestjs/common';
 import { Processor, Process, OnQueueFailed } from '@nestjs/bull';
 import type { Job } from 'bull';
 import { PrismaService } from '@app/database';
-import { MeasurementsService } from '../measurements/measurements.service';
+import { MeasurementExecutor } from '@app/measurement';
 import { RealtimePublisher } from '@app/realtime';
-import { MEASUREMENTS_QUEUE } from '../queue/queue.constants';
-import { MeasurementJobData } from './scheduling.service';
+import { MEASUREMENTS_QUEUE, MeasurementJobData } from '@app/queue';
 
 /**
  * Procesador de la cola 'measurements'.
@@ -19,7 +18,7 @@ export class MeasurementProcessor {
   private readonly logger = new Logger(MeasurementProcessor.name);
 
   constructor(
-    private readonly measurementsService: MeasurementsService,
+    private readonly measurementExecutor: MeasurementExecutor,
     private readonly realtime: RealtimePublisher,
     private readonly prisma: PrismaService,
   ) {}
@@ -42,7 +41,7 @@ export class MeasurementProcessor {
 
     // Ejecuta la medición vía TCP (SCPI Hioki + MUX HTTP), guarda en DB
     // y emite measurement:complete a la sala de la tarea (dentro de measureTask).
-    const result = await this.measurementsService.measureTask(taskId, userId, {
+    const result = await this.measurementExecutor.measureTask(taskId, userId, {
       ranges,
       selectedChannels,
       jobId,

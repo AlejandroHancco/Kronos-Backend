@@ -1,16 +1,12 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectQueue } from '@nestjs/bull';
 import type { Queue } from 'bull';
 import { PrismaService } from '@app/database';
-import { MeasurementsService, MeasurementRange } from '../measurements/measurements.service';
 import { RealtimePublisher } from '@app/realtime';
-import { MEASUREMENTS_QUEUE } from '../queue/queue.constants';
-import {
-  MeasurementSchedulingService,
-  MeasurementJobData,
-  PRIORITY_SCHEDULED,
-} from './scheduling.service';
+import { MEASUREMENTS_QUEUE, MeasurementJobData } from '@app/queue';
+import { MeasurementRange } from '@app/measurement';
+import { MeasurementSchedulingService, PRIORITY_SCHEDULED } from './scheduling.service';
 
 /**
  * Cron que despacha los ScheduledJobs pendientes.
@@ -18,7 +14,6 @@ import {
  *  1. Busca jobs 'pending' con startAt <= ahora
  *  2. Salta los que usan un dispositivo (analyzer/mux) ya ocupado por un job 'running'
  *  3. Publica cada job en la cola Bull 'measurements' con prioridad alta
- *     (o fallback directo sin Redis)
  *  4. Marca el job como 'running'
  *  5. Si tiene intervalMinutes y quedan repeticiones, crea el siguiente job
  *     con startAt = ahora + intervalMinutes y repeatCount - 1
@@ -30,12 +25,10 @@ export class SchedulerService {
 
   constructor(
     private prisma: PrismaService,
-    private measurementsService: MeasurementsService,
     private schedulingService: MeasurementSchedulingService,
     private realtime: RealtimePublisher,
-    @Optional()
     @InjectQueue(MEASUREMENTS_QUEUE)
-    private measurementQueue?: Queue<MeasurementJobData>,
+    private measurementQueue: Queue<MeasurementJobData>,
   ) {}
 
   @Cron(CronExpression.EVERY_MINUTE)
@@ -163,37 +156,15 @@ export class SchedulerService {
       executionIndex: job.executionIndex,
     };
 
-    // 3. Publicar en la cola Bull con prioridad alta (o fallback directo si no hay Redis)
-    if (this.measurementQueue) {
-      await this.measurementQueue.add('execute', payload, {
-        attempts: 3,
-        backoff: { type: 'exponential', delay: 2000 },
-        removeOnComplete: 100,
-        removeOnFail: 100,
-        priority: PRIORITY_SCHEDULED, // por delante de las mediciones manuales
-      });
-      this.logger.log(`Job ${job.id} publicado en la cola (execution ${job.executionIndex})`);
-    } else {
-      // Sin Redis: ejecución directa fire-and-forget con actualización de status
-      this.logger.warn(`Job ${job.id} ejecutándose directamente (sin REDIS_URL)`);
-      this.schedulingService.trackFallbackRun(payload.jobId, payload.estimatedSeconds);
-      void this.measurementsService
-        .measureTask(job.taskId, job.createdBy, payload)
-        .then(() =>
-          this.prisma.scheduledJob.update({
-            where: { id: job.id },
-            data: { status: 'completed' },
-          }),
-        )
-        .catch((error) => {
-          this.logger.error(`Job ${job.id} falló: ${error.message}`);
-          return this.prisma.scheduledJob.update({
-            where: { id: job.id },
-            data: { status: 'failed' },
-          });
-        })
-        .finally(() => this.schedulingService.untrackFallbackRun(payload.jobId));
-    }
+    // 3. Publicar en la cola Bull con prioridad alta
+    await this.measurementQueue.add('execute', payload, {
+      attempts: 3,
+      backoff: { type: 'exponential', delay: 2000 },
+      removeOnComplete: 100,
+      removeOnFail: 100,
+      priority: PRIORITY_SCHEDULED, // por delante de las mediciones manuales
+    });
+    this.logger.log(`Job ${job.id} publicado en la cola (execution ${job.executionIndex})`);
 
     this.realtime.jobStatus(job.createdBy, {
       jobId: `scheduled-${job.id}`,

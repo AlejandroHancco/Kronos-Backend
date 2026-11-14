@@ -1,24 +1,10 @@
-import { ConflictException, Injectable, Logger, Optional } from '@nestjs/common';
+import { ConflictException, Injectable, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bull';
 import type { Queue } from 'bull';
 import { PrismaService } from '@app/database';
-import { MeasurementsService, MeasurementRange } from '../measurements/measurements.service';
 import { RealtimePublisher } from '@app/realtime';
-import { MEASUREMENTS_QUEUE } from '../queue/queue.constants';
-
-/** Payload de los jobs de la cola 'measurements' */
-export interface MeasurementJobData {
-  taskId: number;
-  userId: string;
-  ranges: MeasurementRange[];
-  selectedChannels: number[];
-  jobId: string;
-  /** Duración estimada (segundos) — usada para calcular el backlog de la cola */
-  estimatedSeconds: number;
-  /** Presentes solo cuando la medición proviene de un ScheduledJob */
-  scheduledJobId?: number;
-  executionIndex?: number;
-}
+import { MEASUREMENTS_QUEUE, MeasurementJobData } from '@app/queue';
+import { MeasurementRange, estimateSeconds } from '@app/measurement';
 
 export interface AvailabilityResult {
   available: boolean;
@@ -33,14 +19,6 @@ export interface AvailabilityResult {
   /** Próximo job programado que chocaría (si aplica) */
   nextScheduledAt?: Date;
 }
-
-// ── Modelo ADITIVO de duración ────────────────────────────────────────────────
-// total = canales × [ T_MUX + Σ_rangos (T_SETUP + puntos × T_PUNTO) ]
-// Cada canal repite todos los rangos (así mide measureTask), por eso es aditivo:
-// más canales o más rangos ⇒ más tiempo, linealmente.
-const MUX_SWITCH_SECONDS = 1.5; // cambio de canal en el MUX (HTTP + asentamiento)
-const RANGE_SETUP_SECONDS = 1;  // comandos SCPI de setup por rango (6 × 100ms + margen)
-const SECONDS_PER_POINT = 0.01; // barrido: ~8s para 801 puntos
 
 // Prioridades Bull (menor = más prioritario): los jobs programados van primero
 export const PRIORITY_SCHEDULED = 1;
@@ -60,46 +38,27 @@ export class MeasurementSchedulingService {
     Number(process.env.SCHEDULER_MAX_BACKLOG_SECONDS) || 15 * 60;
   private readonly scheduledMarginSeconds = 60;
 
-  /** Backlog en memoria para el modo fallback (sin Redis) */
-  private fallbackRuns = new Map<string, number>();
-
   constructor(
     private prisma: PrismaService,
-    private measurementsService: MeasurementsService,
     private realtime: RealtimePublisher,
-    @Optional()
     @InjectQueue(MEASUREMENTS_QUEUE)
-    private measurementQueue?: Queue<MeasurementJobData>,
+    private measurementQueue: Queue<MeasurementJobData>,
   ) {}
 
-  /** Estimación aditiva: canales × (mux + Σ rangos(setup + puntos·t)) */
-  estimateSeconds(
-    ranges: { points: number }[],
-    channelCount: number,
-  ): number {
-    const perChannel =
-      MUX_SWITCH_SECONDS +
-      ranges.reduce(
-        (sum, r) => sum + RANGE_SETUP_SECONDS + r.points * SECONDS_PER_POINT,
-        0,
-      );
-    return Math.ceil(channelCount * perChannel);
+  /** Estimación aditiva: ver estimateSeconds en @app/measurement */
+  estimateSeconds(ranges: { points: number }[], channelCount: number): number {
+    return estimateSeconds(ranges, channelCount);
   }
 
-  /** Segundos de trabajo pendiente/activo en la cola (o en memoria sin Redis) */
+  /** Segundos de trabajo pendiente/activo en la cola */
   async getBacklogSeconds(): Promise<number> {
-    if (this.measurementQueue) {
-      try {
-        const jobs = await this.measurementQueue.getJobs(['waiting', 'active', 'delayed']);
-        return jobs.reduce((sum, j) => sum + (j.data?.estimatedSeconds ?? 60), 0);
-      } catch (err) {
-        this.logger.warn(`No se pudo leer la cola (${err.message}) — backlog 0`);
-        return 0;
-      }
+    try {
+      const jobs = await this.measurementQueue.getJobs(['waiting', 'active', 'delayed']);
+      return jobs.reduce((sum, j) => sum + (j.data?.estimatedSeconds ?? 60), 0);
+    } catch (err) {
+      this.logger.warn(`No se pudo leer la cola (${err.message}) — backlog 0`);
+      return 0;
     }
-    let total = 0;
-    for (const est of this.fallbackRuns.values()) total += est;
-    return total;
   }
 
   /**
@@ -171,8 +130,7 @@ export class MeasurementSchedulingService {
   }
 
   /**
-   * Punto de entrada del clic en "medir": valida admisión y encola (o ejecuta
-   * directo sin Redis). Lanza 409 Conflict si no se puede aceptar.
+   * Punto de entrada del clic en "medir": valida admisión y encola. Lanza 409 Conflict si no se puede aceptar.
    */
   async requestMeasurement(
     taskId: number,
@@ -206,46 +164,26 @@ export class MeasurementSchedulingService {
       estimatedSeconds: check.estimatedSeconds,
     };
 
-    if (this.measurementQueue) {
-      const job = await this.measurementQueue.add('execute', payload, {
-        attempts: 3,
-        backoff: { type: 'exponential', delay: 2000 },
-        removeOnComplete: 100,
-        removeOnFail: 100,
-        priority: PRIORITY_MANUAL, // los ScheduledJobs (priority 1) pasan primero
-      });
+    const job = await this.measurementQueue.add('execute', payload, {
+      attempts: 3,
+      backoff: { type: 'exponential', delay: 2000 },
+      removeOnComplete: 100,
+      removeOnFail: 100,
+      priority: PRIORITY_MANUAL, // los ScheduledJobs (priority 1) pasan primero
+    });
 
-      this.realtime.jobStatus(userId, {
-        jobId: String(job.id),
-        taskId,
-        status: 'queued',
-      });
+    this.realtime.jobStatus(userId, {
+      jobId: String(job.id),
+      taskId,
+      status: 'queued',
+    });
 
-      return {
-        jobId: String(job.id),
-        status: 'queued' as const,
-        estimatedSeconds: check.estimatedSeconds,
-        estimatedWaitSeconds: check.backlogSeconds,
-      };
-    }
-
-    // Fallback sin Redis: ejecución directa, registrando el backlog en memoria
-    this.logger.warn('REDIS_URL no configurado — ejecutando medición de forma síncrona');
-    this.fallbackRuns.set(jobId, check.estimatedSeconds);
-    try {
-      return await this.measurementsService.measureTask(taskId, userId, { ...params, jobId });
-    } finally {
-      this.fallbackRuns.delete(jobId);
-    }
-  }
-
-  /** Registra una ejecución directa externa (usada por el cron en modo fallback) */
-  trackFallbackRun(jobId: string, estimatedSeconds: number): void {
-    this.fallbackRuns.set(jobId, estimatedSeconds);
-  }
-
-  untrackFallbackRun(jobId: string): void {
-    this.fallbackRuns.delete(jobId);
+    return {
+      jobId: String(job.id),
+      status: 'queued' as const,
+      estimatedSeconds: check.estimatedSeconds,
+      estimatedWaitSeconds: check.backlogSeconds,
+    };
   }
 
   /**

@@ -81,6 +81,24 @@
       "compilerOptions": {
         "tsConfigPath": "libs/notifications/tsconfig.lib.json"
       }
+    },
+    "queue": {
+      "type": "library",
+      "root": "libs/queue",
+      "entryFile": "index",
+      "sourceRoot": "libs/queue/src",
+      "compilerOptions": {
+        "tsConfigPath": "libs/queue/tsconfig.lib.json"
+      }
+    },
+    "measurement": {
+      "type": "library",
+      "root": "libs/measurement",
+      "entryFile": "index",
+      "sourceRoot": "libs/measurement/src",
+      "compilerOptions": {
+        "tsConfigPath": "libs/measurement/tsconfig.lib.json"
+      }
     }
   }
 }
