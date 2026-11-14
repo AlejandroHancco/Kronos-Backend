@@ -94,7 +94,7 @@ describe('DeviceOpsClient.request', () => {
 
   it('rejects with DeviceOpFailedError carrying the worker message when the job fails', async () => {
     setTimeout(() => queue.emit('global:failed', '42', 'boom'), 5);
-    const err = await client.request('apply-live-configuration', { deviceId: 'd', values: {} }, 500).catch((e) => e);
+    const err: any = await client.request('apply-live-configuration', { deviceId: 'd', values: {} }, 500).catch((e: any) => e);
     expect(err).toBeInstanceOf(DeviceOpFailedError);
     expect(err.message).toBe('boom');
     expect(listenerCount()).toBe(0);

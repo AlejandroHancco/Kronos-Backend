@@ -2,6 +2,7 @@ import 'reflect-metadata';
 import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { WorkerModule } from './worker.module';
+import { DriverParityCheck } from './driver-parity.check';
 
 // Respaldo: un rechazo no manejado (p. ej. un corte de Redis en una librería)
 // se registra en lugar de tumbar el proceso (Node >= 15 sale por defecto).
@@ -12,6 +13,8 @@ process.on('unhandledRejection', (reason) => {
 
 async function bootstrap() {
   const app = await NestFactory.create(WorkerModule);
+  // Antes de cualquier listen/consumo de jobs: un modelo del catálogo sin driver aborta el arranque.
+  app.get(DriverParityCheck).run();
   app.enableShutdownHooks();
 
   const port = Number(process.env.HEALTH_PORT ?? 3001);

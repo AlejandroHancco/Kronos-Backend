@@ -20,7 +20,7 @@ function setup() {
   };
   const teamScope = { assertProjectInTeam: jest.fn(), projectWhereForUser: jest.fn(async () => ({})) };
   const deviceConfiguration = { view: jest.fn(async (d) => ({ deviceId: d.id })), apply: jest.fn(async (d) => ({ deviceId: d.id })) };
-  const deviceOps = { request: jest.fn(async (): Promise<any> => true) };
+  const deviceOps = { request: jest.fn(async (..._args: any[]): Promise<any> => true) };
   return {
     service: new DevicesService(prisma as any, teamScope as any, catalog, deviceConfiguration as any, deviceOps as any),
     prisma, deviceConfiguration, deviceOps,
@@ -73,10 +73,6 @@ describe('DevicesService (tipos por plugin)', () => {
     } finally {
       delete process.env.DEVICE_TEST_TIMEOUT_MS;
     }
-  });
-
-  it('addresslessTypes lista solo tipos sin IP', () => {
-    expect(setup().service.addresslessTypes()).toEqual(['sim-impedance']);
   });
 
   it('describeForUser: 404 fuera del equipo; sensor con lastMeasured', async () => {

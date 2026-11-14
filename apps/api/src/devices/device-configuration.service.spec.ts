@@ -99,7 +99,7 @@ describe('DeviceConfigurationService', () => {
 
   it('MUX: el canal se aplica en vivo vía apply-live-configuration y no se guarda', async () => {
     const { service, update, ops } = setup();
-    ops.request.mockImplementation(async (name: string) => (name === 'apply-live-configuration' ? undefined : {}));
+    ops.request.mockImplementation((async (name: string) => (name === 'apply-live-configuration' ? undefined : {})) as any);
     const view = await service.apply(device('kronos-mux-16'), { channel: 3 });
     expect(ops.request).toHaveBeenCalledWith('apply-live-configuration', { deviceId: 'kronos-mux-16-1', values: { channel: 3 } }, 10000);
     expect(update).not.toHaveBeenCalled();

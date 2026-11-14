@@ -111,10 +111,15 @@ export class DeviceOpsProcessor {
     for (const [name, value] of Object.entries(values ?? {})) {
       const meta = actuator.actuatorValues.find((v) => v.name === name);
       if (!meta) throw new BadRequestException(`"${name}" no es un valor del actuator "${actuatorId}"`);
-      const min = meta.rangeMinimum ?? -Infinity;
-      const max = meta.rangeMaximum ?? Infinity;
-      if (typeof value !== 'number' || !Number.isFinite(value) || value < min || value > max) {
-        throw new BadRequestException(`"${name}" debe estar entre ${meta.rangeMinimum} y ${meta.rangeMaximum}`);
+      const { rangeMinimum: min, rangeMaximum: max } = meta;
+      const outOfRange = typeof value !== 'number' || !Number.isFinite(value) ||
+        (min !== undefined && value < min) || (max !== undefined && value > max);
+      if (outOfRange) {
+        const bounds = min !== undefined && max !== undefined ? `debe estar entre ${min} y ${max}`
+          : min !== undefined ? `debe ser ≥ ${min}`
+          : max !== undefined ? `debe ser ≤ ${max}`
+          : 'debe ser un número';
+        throw new BadRequestException(`"${name}" ${bounds}`);
       }
     }
     const driver = this.drivers.actuator(device.type);

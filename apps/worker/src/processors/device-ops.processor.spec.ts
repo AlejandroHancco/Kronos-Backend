@@ -26,8 +26,8 @@ function job<T>(name: string, data: T): Job<T> {
 
 let redis: Redis;
 
-function setup() {
-  const catalog = new LaasCatalog([HIOKI_IM3570, KRONOS_MUX_16, SIM_IMPEDANCE]);
+function setup(kronos: typeof KRONOS_MUX_16 = KRONOS_MUX_16) {
+  const catalog = new LaasCatalog([HIOKI_IM3570, kronos, SIM_IMPEDANCE]);
   const muxDriver = {
     deviceType: 'kronos-mux-16',
     testConnection: jest.fn(async () => true),
@@ -157,6 +157,33 @@ describe('DeviceOpsProcessor: apply-live-configuration', () => {
 
 describe('DeviceOpsProcessor: set-actuator-data', () => {
   const data = (values: Record<string, number>, actuatorId = 'kronos-mux-16-channel') => ({ deviceId: 'mux1', actuatorId, values });
+
+  // Variante del MUX cuyo valor del actuator solo declara (o ninguna) de las cotas.
+  const withBounds = (bounds: { rangeMinimum?: number; rangeMaximum?: number }) => {
+    const { rangeMinimum, rangeMaximum, ...rest } = KRONOS_MUX_16.description.actuators[0].actuatorValues[0] as any;
+    return {
+      ...KRONOS_MUX_16,
+      description: {
+        ...KRONOS_MUX_16.description,
+        actuators: [{ ...KRONOS_MUX_16.description.actuators[0], actuatorValues: [{ ...rest, ...bounds }] }],
+      },
+    } as typeof KRONOS_MUX_16;
+  };
+
+  it('solo comprueba las cotas que existen y no imprime undefined', async () => {
+    const cases: Array<[{ rangeMinimum?: number; rangeMaximum?: number }, number, string]> = [
+      [{ rangeMinimum: 1 }, 0, '"channel" debe ser ≥ 1'],
+      [{ rangeMaximum: 16 }, 17, '"channel" debe ser ≤ 16'],
+      [{}, NaN, '"channel" debe ser un número'],
+    ];
+    for (const [bounds, value, message] of cases) {
+      const { processor } = setup(withBounds(bounds));
+      await expect(processor.handle(job('set-actuator-data', data({ channel: value })))).rejects.toThrow(new BadRequestException(message));
+    }
+    const { processor, muxDriver } = setup(withBounds({ rangeMinimum: 1 }));
+    await expect(processor.handle(job('set-actuator-data', data({ channel: 9999 })))).resolves.toBe(true);
+    expect(muxDriver.setActuatorData).toHaveBeenCalled();
+  });
 
   it('valida contra los rangos del actuator (mensaje 400)', async () => {
     const { processor, muxDriver } = setup();

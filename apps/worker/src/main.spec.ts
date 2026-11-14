@@ -1,6 +1,8 @@
 jest.mock('./worker.module', () => ({ WorkerModule: class WorkerModule {} }));
+const parityRun = jest.fn();
+jest.mock('./driver-parity.check', () => ({ DriverParityCheck: class DriverParityCheck {} }));
 
-type FakeApp = { enableShutdownHooks: jest.Mock; listen: jest.Mock };
+type FakeApp = { enableShutdownHooks: jest.Mock; listen: jest.Mock; get: jest.Mock };
 
 /**
  * Carga main.ts en un registro de módulos aislado (con NestFactory.create y Logger espiados en ese
@@ -23,6 +25,7 @@ async function runMain(app: FakeApp) {
 const fakeApp = (listen: () => Promise<void> = async () => undefined): FakeApp => ({
   enableShutdownHooks: jest.fn(),
   listen: jest.fn(listen),
+  get: jest.fn(() => ({ run: parityRun })),
 });
 
 describe('worker main.ts', () => {
@@ -31,6 +34,7 @@ describe('worker main.ts', () => {
 
   beforeEach(() => {
     listenersBefore = process.listeners('unhandledRejection');
+    parityRun.mockReset();
     exit = jest.spyOn(process, 'exit').mockImplementation((() => undefined) as any);
   });
   afterEach(() => {
@@ -41,14 +45,23 @@ describe('worker main.ts', () => {
     }
   });
 
-  it('si la paridad catálogo/drivers falla al iniciar, registra el modelo y sale con código 1', async () => {
-    const app = fakeApp(async () => {
+  it('si la paridad catálogo/drivers falla, registra el modelo, sale con código 1 y nunca llega a listen', async () => {
+    parityRun.mockImplementation(() => {
       throw new Error('Catálogo LaaS y drivers no coinciden:\nPlugin "kronos-mux-16": tiene descripción en el catálogo pero está sin driver');
     });
+    const app = fakeApp();
     const { logError } = await runMain(app);
-    expect(app.enableShutdownHooks).toHaveBeenCalled();
     expect(logError).toHaveBeenCalledWith(expect.stringContaining('Plugin "kronos-mux-16"'), expect.anything(), 'Bootstrap');
     expect(exit).toHaveBeenCalledWith(1);
+    expect(app.listen).not.toHaveBeenCalled();
+  });
+
+  it('ejecuta la comprobación de paridad antes de listen', async () => {
+    const order: string[] = [];
+    parityRun.mockImplementation(() => order.push('parity'));
+    const app = fakeApp(async () => { order.push('listen'); });
+    await runMain(app);
+    expect(order).toEqual(['parity', 'listen']);
   });
 
   it('arranca el health endpoint en HEALTH_PORT (3001 por defecto) sin salir', async () => {

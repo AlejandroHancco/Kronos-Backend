@@ -71,11 +71,6 @@ export class DevicesService {
     return entry;
   }
 
-  /** Tipos de dispositivo que no requieren IP (ej. simulados), usado por el health check. */
-  addresslessTypes(): string[] {
-    return this.catalog.catalog().filter((e) => !e.connection.requiresIp).map((e) => e.deviceType);
-  }
-
   async createInProject(projectId: string, createDeviceDto: CreateDeviceDto, userId: string) {
     await this.teamScope.assertProjectInTeam(userId, projectId);
     const entry = this.catalogEntry(createDeviceDto.type);

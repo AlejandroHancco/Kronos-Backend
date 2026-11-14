@@ -80,12 +80,13 @@ describe('WorkerModule', () => {
     await app.close();
   });
 
-  it('si se rompe la paridad catálogo/drivers, la inicialización falla nombrando el modelo', async () => {
+  it('si se rompe la paridad catálogo/drivers, DriverParityCheck.run() falla nombrando el modelo (la inicialización no lo comprueba: lo hace main.ts antes de listen)', async () => {
     const all = DEVICE_DRIVERS.map((D: any) => moduleRef.get(D, { strict: false }));
     const withoutMux = all.filter((d: any) => d.deviceType !== 'kronos-mux-16');
     const broken = await build(withoutMux);
-    const app = broken.createNestApplication();
-    await expect(app.init()).rejects.toThrow(/Plugin "kronos-mux-16": tiene descripción en el catálogo pero está sin driver/);
-    await app.close().catch(() => undefined);
+    expect(() => broken.get(DriverParityCheck, { strict: false }).run()).toThrow(
+      /Plugin "kronos-mux-16": tiene descripción en el catálogo pero está sin driver/,
+    );
+    await broken.close().catch(() => undefined);
   });
 });
