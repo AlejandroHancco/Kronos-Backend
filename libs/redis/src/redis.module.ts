@@ -1,7 +1,9 @@
 import { Global, Module, Logger, Provider } from '@nestjs/common';
 import Redis from 'ioredis';
+import { REDIS_CLIENT } from './redis.constants';
+import { RedisLockService } from './redis-lock.service';
 
-export const REDIS_CLIENT = 'REDIS_CLIENT';
+export { REDIS_CLIENT };
 
 /**
  * Cliente ioredis compartido (caché de permisos, health check, colas).
@@ -30,7 +32,7 @@ const redisProvider: Provider = {
 
 @Global()
 @Module({
-  providers: [redisProvider],
-  exports: [redisProvider],
+  providers: [redisProvider, RedisLockService],
+  exports: [redisProvider, RedisLockService],
 })
 export class RedisModule {}
