@@ -5,7 +5,7 @@ import { DEVICE_BUSY_MARKER, DeviceStateService, RedisLockService, deviceBusyMes
 
 describe('deviceBusyMessage', () => {
   it('es el texto del 409 (dispositivo midiendo o configurándose), con el nombre entre comillas', () => {
-    expect(deviceBusyMessage('MUX')).toBe('"MUX" está midiendo; espera a que termine para cambiar su configuración');
+    expect(deviceBusyMessage('MUX')).toBe('"MUX" está ocupado (midiendo o aplicando otra configuración); espera a que termine');
     expect(deviceBusyMessage('MUX').endsWith(DEVICE_BUSY_MARKER)).toBe(true);
   });
 

@@ -34,7 +34,7 @@ function liveSubset(description: DeviceServiceDescription, values: Record<string
  * Procesador de la cola 'device-ops': operaciones cortas sobre dispositivos pedidas por la API
  * (que nunca abre conexiones al laboratorio). Un único handler '*' con concurrencia 5 para toda la
  * cola. Las operaciones que cambian el estado del equipo toman el lock del dispositivo
- * (DeviceStateService.withExclusive): si está midiendo fallan con el texto del 409, que la API
+ * (DeviceStateService.withExclusive): si está ocupado (midiendo o configurándose) fallan con el texto del 409, que la API
  * reconoce en el failedReason del job (mapDeviceOpError).
  */
 @Processor(DEVICE_OPS_QUEUE)

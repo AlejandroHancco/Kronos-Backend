@@ -25,7 +25,7 @@ function setup() {
 const valueOf = (view: { parameters: Array<{ name: string; value: unknown }> }, name: string) =>
   view.parameters.find((p) => p.name === name)?.value;
 
-const BUSY = '"MUX" está midiendo; espera a que termine para cambiar su configuración';
+const BUSY = '"MUX" está ocupado (midiendo o aplicando otra configuración); espera a que termine';
 
 describe('DeviceConfigurationService', () => {
   beforeEach(async () => { await new RedisMock().flushall(); });

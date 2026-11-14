@@ -46,7 +46,7 @@ describe('actuatorValuesError (IEEE 1876 §4.4.1)', () => {
       actuatorMissingMessage('MUX', 'otro'),
     ];
     for (const m of messages) expect(isActuatorValueError(m!)).toBe(true);
-    expect(isActuatorValueError('"MUX" está midiendo; espera a que termine para cambiar su configuración')).toBe(false);
+    expect(isActuatorValueError('"MUX" está ocupado (midiendo o aplicando otra configuración); espera a que termine')).toBe(false);
     expect(isActuatorValueError('No se pudo activar el canal 4 del MUX')).toBe(false);
   });
 });

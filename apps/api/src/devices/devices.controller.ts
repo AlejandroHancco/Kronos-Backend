@@ -51,7 +51,7 @@ export class DevicesController {
     return this.devicesService.configurationForUser(deviceId, user.id);
   }
 
-  /** setConfiguration: 400 inválido, 409 si está midiendo, 502 si el dispositivo no acepta el valor. */
+  /** setConfiguration: 400 inválido, 409 si está ocupado (midiendo o configurándose), 502 si el dispositivo no acepta el valor. */
   @Put(':deviceId/configuration')
   @RequirePermission('device:edit')
   setConfiguration(

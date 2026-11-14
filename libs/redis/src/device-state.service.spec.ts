@@ -43,7 +43,7 @@ describe('DeviceStateService', () => {
     await locks.tryAcquire('lock:device:m', 60_000);
     const fn = jest.fn();
     await expect(make().withExclusive({ id: 'm', name: 'MUX' }, fn)).rejects.toThrow(
-      new ConflictException('"MUX" está midiendo; espera a que termine para cambiar su configuración'),
+      new ConflictException('"MUX" está ocupado (midiendo o aplicando otra configuración); espera a que termine'),
     );
     expect(fn).not.toHaveBeenCalled();
   });

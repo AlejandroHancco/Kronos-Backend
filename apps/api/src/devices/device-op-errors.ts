@@ -15,7 +15,7 @@ export const deviceOpTimeoutMs = (): number => Number(process.env.DEVICE_OP_TIME
 
 /**
  * Convierte un error de DeviceOpsClient en la excepción HTTP equivalente:
- * sin respuesta → 504, 409 del worker (dispositivo midiendo) → 409, valor de actuator rechazado
+ * sin respuesta → 504, 409 del worker (dispositivo ocupado: DEVICE_BUSY_MARKER) → 409, valor de actuator rechazado
  * por el worker (rango/paso, ver actuatorValuesError) → 400, otro fallo → 502.
  */
 export function mapDeviceOpError(err: unknown, deviceName: string, what = 'la configuración'): Error {
