@@ -23,6 +23,7 @@ import { SearchModule } from './search/search.module';
 import { ReportsModule } from './reports/reports.module';
 import { DevicePluginsModule } from './device-plugins/device-plugins.module';
 import { GatewayModule } from './gateway/gateway.module';
+import { LaasModule } from './laas/laas.module';
 import { RedisModule } from '@app/redis';
 import { RealtimeModule } from '@app/realtime';
 import { CommonModule } from '@app/common';
@@ -66,6 +67,8 @@ import { PrismaModule } from '@app/database';
     DashboardModule,
     HealthModule,
     SearchModule,
+    // IEEE 1876-2019 §4 (Lab as a Service): /laas/v1
+    LaasModule,
   ],
   controllers: [AppController],
   providers: [

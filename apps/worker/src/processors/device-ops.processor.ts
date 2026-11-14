@@ -9,6 +9,8 @@ import {
   ConfigurationValues,
   DeviceServiceDescription,
   LaasCatalog,
+  actuatorMissingMessage,
+  actuatorValuesError,
   toDeviceContext,
 } from '@app/laas-catalog';
 import {
@@ -107,21 +109,10 @@ export class DeviceOpsProcessor {
     const device = await this.findDevice(deviceId);
     const description = this.catalog.describe(device.type);
     const actuator = description.actuators.find((a) => a.actuatorId === actuatorId);
-    if (!actuator) throw new BadRequestException(`"${device.name}" no tiene el actuator "${actuatorId}"`);
-    for (const [name, value] of Object.entries(values ?? {})) {
-      const meta = actuator.actuatorValues.find((v) => v.name === name);
-      if (!meta) throw new BadRequestException(`"${name}" no es un valor del actuator "${actuatorId}"`);
-      const { rangeMinimum: min, rangeMaximum: max } = meta;
-      const outOfRange = typeof value !== 'number' || !Number.isFinite(value) ||
-        (min !== undefined && value < min) || (max !== undefined && value > max);
-      if (outOfRange) {
-        const bounds = min !== undefined && max !== undefined ? `debe estar entre ${min} y ${max}`
-          : min !== undefined ? `debe ser ≥ ${min}`
-          : max !== undefined ? `debe ser ≤ ${max}`
-          : 'debe ser un número';
-        throw new BadRequestException(`"${name}" ${bounds}`);
-      }
-    }
+    if (!actuator) throw new BadRequestException(actuatorMissingMessage(device.name, actuatorId));
+    // Rangos y paso declarados (IEEE 1876 §4.4.1); la API reconoce estos mensajes y responde 400.
+    const invalid = actuatorValuesError(actuator, values ?? {});
+    if (invalid) throw new BadRequestException(invalid);
     const driver = this.drivers.actuator(device.type);
     await this.deviceState.withExclusive(device, async () => {
       await driver.setActuatorData(toDeviceContext(device, description), actuatorId, values);

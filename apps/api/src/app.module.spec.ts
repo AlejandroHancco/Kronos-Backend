@@ -65,5 +65,7 @@ describe('api AppModule', () => {
     }
     // sanity: discovery does see the api providers
     expect(names).toContain('DevicesService');
+    expect(names).toContain('LaasMetadataService');
+    expect(names).toContain('LaasInstancesService');
   });
 });

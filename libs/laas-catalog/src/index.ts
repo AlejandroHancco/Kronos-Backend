@@ -8,3 +8,4 @@ export * from './laas-catalog';
 export * from './laas-catalog.module';
 export * from './models';
 export * from './measurement-data';
+export * from './actuator-values';
