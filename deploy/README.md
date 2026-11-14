@@ -5,7 +5,8 @@ Copy `.env.example` to `.env` on each VM and fill it in.
 
 ## Order
 
-1. **vm-data** - `cd deploy/vm-data && cp .env.example .env && docker compose up -d`.
+1. **vm-data** - `cd deploy/vm-data && cp .env.example .env`, set `POSTGRES_IMAGE_TAG` to the
+   source Postgres major (e.g. 17 for a new Supabase project), then `docker compose up -d`.
    Then migrate existing data: see [vm-data/MIGRATION.md](vm-data/MIGRATION.md).
    Backups: `backup.sh`, cron `0 3 * * * /opt/smartconcrete/deploy/vm-data/backup.sh`
    (daily `pg_dump -Fc` into `backups/`, keeps the 7 newest).
@@ -31,6 +32,7 @@ Postgres and Redis are published only on `PRIVATE_IP` of vm-data.
 | VM | Variable | Notes |
 |----|----------|-------|
 | data | `PRIVATE_IP`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `REDIS_PASSWORD` | URL-safe passwords recommended (see below) |
+| data | `POSTGRES_IMAGE_TAG` (16) | Postgres major; set it to the migration source's major (e.g. 17) before first start |
 | worker | `DATABASE_URL` | `postgresql://USER:PASS@<data-private-ip>:5432/DB` |
 | worker | `REDIS_URL` | `redis://:PASSWORD@<data-private-ip>:6379` (password required) |
 | worker | `HEALTH_PORT` (3001), `DEVICE_LOCK_WAIT_MS` (900000) | |

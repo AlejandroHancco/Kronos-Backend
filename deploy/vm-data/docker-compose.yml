@@ -1,8 +1,9 @@
-# vm-data: Postgres 16 + Redis 7 (AOF + password), bound to the private IP only.
+# vm-data: Postgres (major = POSTGRES_IMAGE_TAG, default 16) + Redis 7 (AOF + password),
+# bound to the private IP only. Set POSTGRES_IMAGE_TAG to the migration source's major.
 # Run from this directory:  docker compose --env-file .env up -d
 services:
   postgres:
-    image: postgres:16
+    image: postgres:${POSTGRES_IMAGE_TAG:-16}
     restart: always
     environment:
       POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER required}
