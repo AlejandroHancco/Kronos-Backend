@@ -108,6 +108,15 @@
       "compilerOptions": {
         "tsConfigPath": "libs/measurement/tsconfig.lib.json"
       }
+    },
+    "experiments": {
+      "type": "library",
+      "root": "libs/experiments",
+      "entryFile": "index",
+      "sourceRoot": "libs/experiments/src",
+      "compilerOptions": {
+        "tsConfigPath": "libs/experiments/tsconfig.lib.json"
+      }
     }
   }
 }

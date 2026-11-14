@@ -5,8 +5,8 @@ import { TeamScopeService } from '@app/common';
 import { RealtimePublisher } from '@app/realtime';
 import { NotificationWriter } from '@app/notifications';
 import { DeviceDriverRegistry } from '@app/device-drivers';
+import { ExperimentConfigService } from '@app/experiments';
 import {
-  ExperimentConfigService,
   buildMeasurementData,
   requestsFor,
   snapshotOf,

@@ -7,7 +7,7 @@ import { estimateAcquisitionSeconds } from '@app/laas-catalog';
 import { RealtimePublisher } from '@app/realtime';
 import { MEASUREMENTS_QUEUE, MeasurementJobData, PRIORITY_MANUAL } from '@app/queue';
 import { PrefDevices, sharesDevice } from './device-usage';
-import { ExperimentConfigService, ResolvedExperiment, toSweepRanges } from '@app/laas-catalog';
+import { ExperimentConfigService, ResolvedExperiment, toSweepRanges } from '@app/experiments';
 
 /** Experimento resuelto + duración estimada de una ejecución (ver resolveWithEstimate). */
 export interface ExecutionEstimate<R extends { points: number } = SweepRange> {

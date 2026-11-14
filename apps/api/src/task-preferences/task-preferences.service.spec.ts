@@ -1,5 +1,5 @@
 import { TaskPreferencesService } from './task-preferences.service';
-import { ExperimentConfigService } from '@app/laas-catalog';
+import { ExperimentConfigService } from '@app/experiments';
 import { HIOKI_IM3570, KRONOS_MUX_16, LaasCatalog, SIM_IMPEDANCE } from '@app/laas-catalog';
 
 const device = (id: string, type: string) => ({ id, name: id, type, ip: null, projectId: 'P' });

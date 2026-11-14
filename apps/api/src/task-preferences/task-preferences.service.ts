@@ -2,7 +2,7 @@ import { HttpException, HttpStatus, Injectable, NotFoundException } from '@nestj
 import { Device, Prisma, TaskPreference } from '@prisma/client';
 import { PrismaService } from '@app/database';
 import { TeamScopeService } from '@app/common';
-import { ExperimentConfigService, toSweepRanges } from '@app/laas-catalog';
+import { ExperimentConfigService, toSweepRanges } from '@app/experiments';
 import { invalidChannels } from '@app/laas-catalog';
 import { SweepRange } from '@app/laas-catalog';
 import { CreateTaskPreferenceDto, TaskPreferenceRangeDto } from './dto/create-task-preference.dto';

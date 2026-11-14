@@ -2,7 +2,7 @@ import { BadRequestException, Logger } from '@nestjs/common';
 import { SchedulerService } from './scheduler.service';
 import { PRIORITY_SCHEDULED } from '@app/queue';
 import { MeasurementSchedulingService } from './scheduling.service';
-import { ExperimentConfigService } from '@app/laas-catalog';
+import { ExperimentConfigService } from '@app/experiments';
 
 const sweepAcq = {
   kind: 'sweep' as const,

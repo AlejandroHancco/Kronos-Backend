@@ -1,5 +1,6 @@
 import { Global, Module } from '@nestjs/common';
 import { LaasCatalogModule } from '@app/laas-catalog';
+import { ExperimentsModule } from '@app/experiments';
 // Intermedio: la API aún hace E/S (medición, test-connection, configuración live) hasta que pase al worker.
 import { DeviceDriversModule } from '@app/device-drivers';
 import { DevicePluginsController } from './device-plugins.controller';
@@ -19,7 +20,7 @@ import { CommonModule } from '@app/common';
  */
 @Global()
 @Module({
-  imports: [PrismaModule, PermissionsModule, CommonModule, LaasCatalogModule, DeviceDriversModule],
+  imports: [PrismaModule, PermissionsModule, CommonModule, LaasCatalogModule, ExperimentsModule, DeviceDriversModule],
   controllers: [DevicePluginsController, ExperimentsController, ProjectExperimentsController],
   providers: [
     ExperimentCatalogService,
@@ -28,6 +29,7 @@ import { CommonModule } from '@app/common';
   ],
   exports: [
     LaasCatalogModule,
+    ExperimentsModule,
     DeviceDriversModule,
     ExperimentCatalogService,
     DeviceActivityService,

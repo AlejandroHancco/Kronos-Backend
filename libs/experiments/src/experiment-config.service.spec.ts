@@ -1,7 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import { ExperimentConfigService } from './experiment-config.service';
-import { HIOKI_IM3570, KRONOS_MUX_16, SIM_IMPEDANCE } from './models';
-import { LaasCatalog } from './laas-catalog';
+import { HIOKI_IM3570, KRONOS_MUX_16, LaasCatalog, SIM_IMPEDANCE } from '@app/laas-catalog';
 
 const catalog = new LaasCatalog([HIOKI_IM3570, KRONOS_MUX_16, SIM_IMPEDANCE]);
 const device = (id: string, type: string | null, configuration: unknown = null) =>

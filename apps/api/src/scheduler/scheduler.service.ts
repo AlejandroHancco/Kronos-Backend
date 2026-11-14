@@ -3,7 +3,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectQueue } from '@nestjs/bull';
 import type { Queue } from 'bull';
 import { PrismaService } from '@app/database';
-import { ExperimentConfigService } from '@app/laas-catalog';
+import { ExperimentConfigService } from '@app/experiments';
 import { RealtimePublisher } from '@app/realtime';
 import { MEASUREMENTS_QUEUE, MeasurementJobData, PRIORITY_SCHEDULED } from '@app/queue';
 import { MeasurementSchedulingService, ExecutionEstimate } from './scheduling.service';

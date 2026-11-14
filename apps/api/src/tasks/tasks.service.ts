@@ -2,7 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '@app/database';
 import { TeamScopeService } from '@app/common';
 import { MeasurementSchedulingService } from '../scheduler/scheduling.service';
-import { ExperimentConfigService } from '@app/laas-catalog';
+import { ExperimentConfigService } from '@app/experiments';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { MeasureDto } from './dto/measure.dto';
