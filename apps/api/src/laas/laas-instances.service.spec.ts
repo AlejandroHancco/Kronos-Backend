@@ -217,7 +217,7 @@ describe('LaasInstancesService: setActuatorData', () => {
     const res = await service.setActuatorData('u1', ID, { channel: 5 });
     expect(res).toEqual({ actuatorId: ID, values: { channel: 5 }, appliedAt: expect.any(String) });
     expect(Number.isNaN(Date.parse(res.appliedAt))).toBe(false);
-    expect(deviceOps.request).toHaveBeenCalledWith('set-actuator-data', { deviceId: MUX, actuatorId: 'kronos-mux-16-channel', values: { channel: 5 } }, 10000);
+    expect(deviceOps.request).toHaveBeenCalledWith('set-actuator-data', { deviceId: MUX, actuatorId: 'kronos-mux-16-channel', values: { channel: 5 } }, 25000);
   });
 
   it('400 fuera de rango (validado por el worker)', async () => {

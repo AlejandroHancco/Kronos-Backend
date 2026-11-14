@@ -42,7 +42,7 @@ describe('DeviceConfigurationService', () => {
     const { service, ops } = setup();
     ops.request.mockResolvedValue({ channel: 5 });
     const view = await service.view(device('kronos-mux-16'));
-    expect(ops.request).toHaveBeenCalledWith('read-live-configuration', { deviceId: 'kronos-mux-16-1' }, 10000);
+    expect(ops.request).toHaveBeenCalledWith('read-live-configuration', { deviceId: 'kronos-mux-16-1' }, 25000);
     expect(valueOf(view, 'channel')).toBe(5);
     process.env.DEVICE_OP_TIMEOUT_MS = '2500';
     try {
@@ -101,7 +101,7 @@ describe('DeviceConfigurationService', () => {
     const { service, update, ops } = setup();
     ops.request.mockImplementation((async (name: string) => (name === 'apply-live-configuration' ? undefined : {})) as any);
     const view = await service.apply(device('kronos-mux-16'), { channel: 3 });
-    expect(ops.request).toHaveBeenCalledWith('apply-live-configuration', { deviceId: 'kronos-mux-16-1', values: { channel: 3 } }, 10000);
+    expect(ops.request).toHaveBeenCalledWith('apply-live-configuration', { deviceId: 'kronos-mux-16-1', values: { channel: 3 } }, 25000);
     expect(update).not.toHaveBeenCalled();
     expect(valueOf(view, 'channel')).toBeNull();
   });

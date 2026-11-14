@@ -6,7 +6,12 @@ import { DEVICE_BUSY_MARKER } from '@app/redis';
 
 /** Timeouts de las operaciones de dispositivo (se leen en cada llamada). */
 export const deviceTestTimeoutMs = (): number => Number(process.env.DEVICE_TEST_TIMEOUT_MS) || 5000;
-export const deviceOpTimeoutMs = (): number => Number(process.env.DEVICE_OP_TIMEOUT_MS) || 10000;
+/**
+ * Regla: DEVICE_OP_TIMEOUT_MS debe superar el presupuesto de la operación live más lenta de los
+ * drivers (hoy el MUX Kronos: 3 intentos × 5 s de axios + 2 × 500 ms de espera ≈ 16 s); si no, la API
+ * responde 504 mientras el worker aún puede terminar la operación.
+ */
+export const deviceOpTimeoutMs = (): number => Number(process.env.DEVICE_OP_TIMEOUT_MS) || 25000;
 
 /**
  * Convierte un error de DeviceOpsClient en la excepción HTTP equivalente:

@@ -60,9 +60,9 @@ Postgres and Redis are published only on `PRIVATE_IP` of vm-data.
 | data | `POSTGRES_IMAGE_TAG` (16) | Postgres major; set it to the migration source's major (e.g. 17) before first start |
 | worker | `DATABASE_URL` | `postgresql://USER:PASS@<data-private-ip>:5432/DB?schema=platform` |
 | worker | `REDIS_URL` | `redis://:PASSWORD@<data-private-ip>:6379` (password required) |
-| worker | `HEALTH_PORT` (3001), `DEVICE_LOCK_WAIT_MS` (900000), `DEVICE_TEST_TIMEOUT_MS` (5000), `DEVICE_OP_TIMEOUT_MS` (10000) | |
+| worker | `HEALTH_PORT` (3001), `DEVICE_LOCK_WAIT_MS` (900000), `DEVICE_TEST_TIMEOUT_MS` (5000), `DEVICE_OP_TIMEOUT_MS` (25000; must exceed the slowest driver live-op budget, Kronos MUX ~16 s) | |
 | app | `DATABASE_URL`, `REDIS_URL` | same formats as worker |
-| app | `PORT` (3000), `FRONTEND_URL`, `JWT_SECRET`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_JWT_SECRET`, `SCHEDULER_MAX_BACKLOG_SECONDS` (900), `DEVICE_TEST_TIMEOUT_MS` (5000), `DEVICE_OP_TIMEOUT_MS` (10000) | api-only |
+| app | `PORT` (3000), `FRONTEND_URL`, `JWT_SECRET`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_JWT_SECRET`, `SCHEDULER_MAX_BACKLOG_SECONDS` (900), `DEVICE_TEST_TIMEOUT_MS` (5000), `DEVICE_OP_TIMEOUT_MS` (25000; must exceed the slowest driver live-op budget, Kronos MUX ~16 s) | api-only |
 | app | `LAAS_TITLE`, `LAAS_DESCRIPTION`, `LAAS_TERMS_URL`, `LAAS_CONTACT`, `LAAS_LICENSE`, `LAAS_LICENSE_URL`, `LAAS_BASE_URL` | IEEE 1876 service description (`/laas/v1`), optional |
 | app | `APP_DOMAIN`, `API_DOMAIN` | Caddy |
 | app | `VITE_API_URL`, `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_PUBLIC_URL` | frontend build args (baked at build time; rebuild to change) |

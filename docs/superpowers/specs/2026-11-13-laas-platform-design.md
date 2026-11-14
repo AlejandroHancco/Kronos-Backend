@@ -113,7 +113,7 @@ Redis obligatorio; leader locks; `device-ops`; `/health` con 503; Docker/deploy/
 | Job | Usado por (API) | Timeout por defecto |
 |---|---|---|
 | `test-connection` | `POST /devices/test-connection` | `DEVICE_TEST_TIMEOUT_MS` 5000 |
-| `read-live-configuration` | `GET /devices/:id/configuration` (valores `live`) | `DEVICE_OP_TIMEOUT_MS` 10000 |
+| `read-live-configuration` | `GET /devices/:id/configuration` (valores `live`) | `DEVICE_OP_TIMEOUT_MS` 25000 |
 | `apply-live-configuration` | `PUT /devices/:id/configuration` | `DEVICE_OP_TIMEOUT_MS` |
 | `set-actuator-data` | `PUT /laas/v1/actuators/:actuatorId/data` | `DEVICE_OP_TIMEOUT_MS` |
 
