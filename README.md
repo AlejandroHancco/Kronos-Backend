@@ -33,15 +33,21 @@ $ npm install
 
 ## Compile and run the project
 
-```bash
-# development
-$ npm run start
+The repo is a Nest monorepo with two apps: `apps/api` (HTTP + Socket.io, port 3000) and `apps/worker` (queue processors, health on port 3001). Both require `REDIS_URL`.
 
-# watch mode
+```bash
+# 1. start dev Redis (add "--profile db" to also start a local Postgres)
+$ docker compose -f docker-compose.dev.yml up -d
+
+# 2. copy .env.example to .env and set REDIS_URL, DATABASE_URL, etc.
+
+# development: api + worker in watch mode
 $ npm run start:dev
 
-# production mode
-$ npm run start:prod
+# production
+$ npm run build
+$ npm run start:api
+$ npm run start:worker
 ```
 
 ## Run tests
