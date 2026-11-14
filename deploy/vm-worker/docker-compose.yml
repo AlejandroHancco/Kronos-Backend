@@ -1,0 +1,11 @@
+# vm-worker: network_mode host so the host's Tailscale subnet routes reach the labs.
+# HEALTH_PORT (3001) is bound on the host: firewall it, never expose publicly.
+# Run from this directory:  docker compose up -d --build
+services:
+  worker:
+    build:
+      context: ../..
+      target: worker
+    env_file: .env
+    network_mode: host
+    restart: always
