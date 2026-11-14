@@ -10,14 +10,6 @@ import {
 import { Server, Socket } from 'socket.io';
 import { Injectable, Logger } from '@nestjs/common';
 
-export interface JobStatusPayload {
-  jobId: string;
-  taskId?: number;
-  status: 'queued' | 'processing' | 'completed' | 'failed' | 'retrying';
-  attempt?: number;
-  error?: string;
-}
-
 /**
  * Gateway principal de tiempo real (namespace /kronos).
  * - Sala `user:{userId}`  → estado de jobs y notificaciones personales
@@ -62,29 +54,5 @@ export class KronosGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage('leave-task')
   handleLeaveTask(@ConnectedSocket() socket: Socket, @MessageBody() taskId: number | string) {
     socket.leave(`task:${taskId}`);
-  }
-
-  /** Emite a todos los clientes suscritos a la tarea cuando termina una medición */
-  emitMeasurementComplete(taskId: number, data: any) {
-    this.server.to(`task:${taskId}`).emit('measurement:complete', { taskId, ...data });
-    this.logger.log(`measurement:complete emitted to task:${taskId}`);
-  }
-
-  /** Notifica el estado del job (queued/processing/completed/failed/retrying) al usuario */
-  emitJobStatus(userId: string, status: JobStatusPayload) {
-    this.server.to(`user:${userId}`).emit('job:status', status);
-    this.logger.debug(`job:status ${status.status} emitted to user:${userId}`);
-  }
-
-  /** Notificación in-app en tiempo real */
-  emitNotification(userId: string, notification: any) {
-    this.server.to(`user:${userId}`).emit('notification', notification);
-    this.logger.log(`notification emitted to user:${userId}`);
-  }
-
-  /** Cambio de estado online/offline de un dispositivo (broadcast: no es información sensible) */
-  emitDeviceStatusChanged(deviceId: string, projectId: string, status: string) {
-    this.server.emit('device:status', { deviceId, projectId, status });
-    this.logger.log(`device:status ${status} emitted for device ${deviceId}`);
   }
 }

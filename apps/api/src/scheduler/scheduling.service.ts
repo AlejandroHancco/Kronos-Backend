@@ -3,7 +3,7 @@ import { InjectQueue } from '@nestjs/bull';
 import type { Queue } from 'bull';
 import { PrismaService } from '@app/database';
 import { MeasurementsService, MeasurementRange } from '../measurements/measurements.service';
-import { KronosGateway } from '../gateway/kronos.gateway';
+import { RealtimePublisher } from '@app/realtime';
 import { MEASUREMENTS_QUEUE } from '../queue/queue.constants';
 
 /** Payload de los jobs de la cola 'measurements' */
@@ -66,7 +66,7 @@ export class MeasurementSchedulingService {
   constructor(
     private prisma: PrismaService,
     private measurementsService: MeasurementsService,
-    private kronosGateway: KronosGateway,
+    private realtime: RealtimePublisher,
     @Optional()
     @InjectQueue(MEASUREMENTS_QUEUE)
     private measurementQueue?: Queue<MeasurementJobData>,
@@ -215,7 +215,7 @@ export class MeasurementSchedulingService {
         priority: PRIORITY_MANUAL, // los ScheduledJobs (priority 1) pasan primero
       });
 
-      this.kronosGateway.emitJobStatus(userId, {
+      this.realtime.jobStatus(userId, {
         jobId: String(job.id),
         taskId,
         status: 'queued',

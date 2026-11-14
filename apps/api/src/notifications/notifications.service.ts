@@ -1,6 +1,6 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '@app/database';
-import { KronosGateway } from '../gateway/kronos.gateway';
+import { RealtimePublisher } from '@app/realtime';
 
 const MEASUREMENT_EVENT_TYPES = ['MEASUREMENT_COMPLETE', 'MEASUREMENT_WARNING', 'MEASUREMENT_FAILED'];
 
@@ -10,7 +10,7 @@ export class NotificationsService {
 
   constructor(
     private prisma: PrismaService,
-    private gateway: KronosGateway,
+    private realtime: RealtimePublisher,
   ) {}
 
   /**
@@ -43,7 +43,7 @@ export class NotificationsService {
         skipDuplicates: true,
       });
       for (const userId of notifyUserIds) {
-        this.gateway.emitNotification(userId, {
+        this.realtime.notification(userId, {
           id: event.id,
           type: event.type,
           title: event.title,

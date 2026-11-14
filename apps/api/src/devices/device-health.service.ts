@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
 import { PrismaService } from '@app/database';
 import { DevicesService } from './devices.service';
-import { KronosGateway } from '../gateway/kronos.gateway';
+import { RealtimePublisher } from '@app/realtime';
 
 const CHECK_INTERVAL_MS = 30_000;
 const CONCURRENCY = 5;
@@ -20,7 +20,7 @@ export class DeviceHealthService {
   constructor(
     private prisma: PrismaService,
     private devicesService: DevicesService,
-    private kronosGateway: KronosGateway,
+    private realtime: RealtimePublisher,
   ) {}
 
   @Interval(CHECK_INTERVAL_MS)
@@ -64,6 +64,6 @@ export class DeviceHealthService {
       data: { status: newStatus },
     });
 
-    this.kronosGateway.emitDeviceStatusChanged(device.id, device.projectId, newStatus);
+    this.realtime.deviceStatus(device.id, device.projectId, newStatus);
   }
 }

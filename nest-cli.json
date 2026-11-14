@@ -63,6 +63,15 @@
       "compilerOptions": {
         "tsConfigPath": "libs/device-plugins/tsconfig.lib.json"
       }
+    },
+    "realtime": {
+      "type": "library",
+      "root": "libs/realtime",
+      "entryFile": "index",
+      "sourceRoot": "libs/realtime/src",
+      "compilerOptions": {
+        "tsConfigPath": "libs/realtime/tsconfig.lib.json"
+      }
     }
   }
 }

@@ -1,8 +1,7 @@
 import { Injectable, HttpException, HttpStatus, Logger, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '@app/database';
 import { TeamScopeService } from '@app/common';
-import { MeasurementsGateway } from './measurements.gateway';
-import { KronosGateway } from '../gateway/kronos.gateway';
+import { RealtimePublisher } from '@app/realtime';
 import { NotificationsService } from '../notifications/notifications.service';
 import { classifyMeasurement, MeasurementClassification } from './kronos-watcher';
 import { DevicePluginRegistry } from '@app/device-plugins';
@@ -22,8 +21,7 @@ export class MeasurementsService {
   constructor(
       private prisma: PrismaService,
       private teamScope: TeamScopeService,
-      private measurementsGateway: MeasurementsGateway,
-      private kronosGateway: KronosGateway,
+      private realtime: RealtimePublisher,
       private notificationsService: NotificationsService,
       private devicePlugins: DevicePluginRegistry,
   ) {}
@@ -281,7 +279,7 @@ export class MeasurementsService {
 
           // 4c. Emitir progreso DESPUÉS de medir para reflejar estado real
           const progress = Math.round(((index + 1) / uniqueChannels.length) * 100);
-          this.measurementsGateway.emitMeasurementProgress(
+          this.realtime.measurementProgress(
               userId,
               jobId,
               channel,
@@ -297,7 +295,7 @@ export class MeasurementsService {
           results.push({ channel, channelData: null });
 
           const progress = Math.round(((index + 1) / uniqueChannels.length) * 100);
-          this.measurementsGateway.emitMeasurementProgress(
+          this.realtime.measurementProgress(
               userId,
               jobId,
               channel,
@@ -381,7 +379,7 @@ export class MeasurementsService {
       );
 
       // 9. Emitir completado (sala personal del usuario + sala de la tarea)
-      this.measurementsGateway.emitMeasurementCompleted(
+      this.realtime.measurementCompleted(
           userId,
           jobId,
           measurement.id,
@@ -390,7 +388,7 @@ export class MeasurementsService {
           measurementData,
       );
 
-      this.kronosGateway.emitMeasurementComplete(taskId, {
+      this.realtime.measurementComplete(taskId, {
         jobId,
         measurementId: measurement.id,
         takenAt: measurement.takenAt || new Date(),
@@ -409,7 +407,7 @@ export class MeasurementsService {
     } catch (error) {
       this.logger.error(`Measurement error: ${error.message}`);
 
-      this.measurementsGateway.emitMeasurementError(
+      this.realtime.measurementError(
           userId,
           jobId,
           error.message,

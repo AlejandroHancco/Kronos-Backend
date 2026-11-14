@@ -7,6 +7,6 @@ import { PrismaService } from '@app/database';
 @Module({
   controllers: [MeasurementsController],
   providers: [MeasurementsService, MeasurementsGateway, PrismaService],
-  exports: [MeasurementsService, MeasurementsGateway],
+  exports: [MeasurementsService],
 })
 export class MeasurementsModule {}
