@@ -59,7 +59,7 @@ import { PrismaModule } from '@app/database';
     TaskChannelsModule,
     MeasurementChannelsModule,
     ScheduledJobsModule,
-    // Orquestación de mediciones: cron de ScheduledJobs + control de admisión
+    // Control de admisión de mediciones manuales (el cron de ScheduledJobs corre en el worker)
     SchedulerModule,
     PermissionsModule,
     NotificationsModule,
