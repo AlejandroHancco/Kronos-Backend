@@ -61,7 +61,7 @@ function setup(dueJobs: any[], resolveFor: (taskId: number) => unknown) {
     return r as any;
   });
   const queue = { add: jest.fn(async () => ({ id: 'q1' })), getJobs: jest.fn(async () => []) };
-  const kronosGateway = { emitJobStatus: jest.fn() };
+  const kronosGateway = { jobStatus: jest.fn() };
   const measurementsService = { measureTask: jest.fn() };
   const scheduling = new MeasurementSchedulingService(
     prisma as any, measurementsService as any, kronosGateway as any, experimentConfig, queue as any,

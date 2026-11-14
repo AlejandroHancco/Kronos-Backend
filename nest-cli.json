@@ -46,6 +46,15 @@
         "tsConfigPath": "libs/redis/tsconfig.lib.json"
       }
     },
+    "realtime": {
+      "type": "library",
+      "root": "libs/realtime",
+      "entryFile": "index",
+      "sourceRoot": "libs/realtime/src",
+      "compilerOptions": {
+        "tsConfigPath": "libs/realtime/tsconfig.lib.json"
+      }
+    },
     "common": {
       "type": "library",
       "root": "libs/common",

@@ -3,7 +3,7 @@ import { Processor, Process, OnQueueFailed } from '@nestjs/bull';
 import type { Job } from 'bull';
 import { PrismaService } from '@app/database';
 import { MeasurementsService } from '../measurements/measurements.service';
-import { KronosGateway } from '../gateway/kronos.gateway';
+import { RealtimePublisher } from '@app/realtime';
 import { MEASUREMENTS_QUEUE } from '../queue/queue.constants';
 import { MeasurementJobData } from './scheduling.service';
 
@@ -20,7 +20,7 @@ export class MeasurementProcessor {
 
   constructor(
     private readonly measurementsService: MeasurementsService,
-    private readonly kronosGateway: KronosGateway,
+    private readonly realtime: RealtimePublisher,
     private readonly prisma: PrismaService,
   ) {}
 
@@ -33,7 +33,7 @@ export class MeasurementProcessor {
       `Processing measurement job ${job.id} (task ${taskId}, attempt ${job.attemptsMade + 1}/${job.opts.attempts})`,
     );
 
-    this.kronosGateway.emitJobStatus(userId, {
+    this.realtime.jobStatus(userId, {
       jobId: String(job.id),
       taskId,
       status: 'processing',
@@ -58,7 +58,7 @@ export class MeasurementProcessor {
       });
     }
 
-    this.kronosGateway.emitJobStatus(userId, {
+    this.realtime.jobStatus(userId, {
       jobId: String(job.id),
       taskId,
       status: 'completed',
@@ -89,7 +89,7 @@ export class MeasurementProcessor {
         );
     }
 
-    this.kronosGateway.emitJobStatus(userId, {
+    this.realtime.jobStatus(userId, {
       jobId: String(job.id),
       taskId,
       status: willRetry ? 'retrying' : 'failed',

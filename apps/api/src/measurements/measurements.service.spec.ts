@@ -19,8 +19,7 @@ function setup(resolved?: any) {
     assertMeasurementInTeam: jest.fn(),
     projectWhereForUser: jest.fn(async () => ({})),
   };
-  const gateway = { emitMeasurementProgress: jest.fn(), emitMeasurementError: jest.fn(), emitMeasurementCompleted: jest.fn() };
-  const kronos = { emitMeasurementComplete: jest.fn() };
+  const gateway = { measurementProgress: jest.fn(), measurementError: jest.fn(), measurementCompleted: jest.fn(), measurementComplete: jest.fn() };
   const notifications = {
     notifyTeamMeasurementSuccess: jest.fn(), notifyTeamMeasurementWarning: jest.fn(), notifyTeamMeasurementFailed: jest.fn(),
   };
@@ -28,7 +27,7 @@ function setup(resolved?: any) {
   const release = jest.fn();
   const deviceActivity = { beginMeasurement: jest.fn(async () => release) };
   const service = new MeasurementsService(
-    prisma as any, teamScope as any, gateway as any, kronos as any, notifications as any, experimentConfig as any,
+    prisma as any, teamScope as any, gateway as any, notifications as any, experimentConfig as any,
     deviceActivity as any,
   );
   return { service, prisma, gateway, notifications, deviceActivity, release };
@@ -143,9 +142,9 @@ describe('MeasurementsService.measureTask (sensor + selector de canal)', () => {
     expect(data).toMatchObject({ start: 1, stop: 4, points: 5, scale: 'LOG', acquisition: snapshot, sensorDeviceIp: null });
     expect(data.data.map((p: any) => p.x)).toEqual([1, 3]);
     expect(out.acquisition).toEqual(snapshot);
-    expect(gateway.emitMeasurementCompleted.mock.calls[0][7]).toEqual(snapshot);
+    expect(gateway.measurementCompleted.mock.calls[0][7]).toEqual(snapshot);
     expect(out.channels).toEqual([1]);
-    expect(gateway.emitMeasurementCompleted.mock.calls[0][8]).toEqual([1]);
+    expect(gateway.measurementCompleted.mock.calls[0][8]).toEqual([1]);
   });
 
   it('sin selector: solo getSensorData, una vez por rango', async () => {

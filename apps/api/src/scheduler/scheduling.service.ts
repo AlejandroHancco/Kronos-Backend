@@ -5,7 +5,7 @@ import { PrismaService } from '@app/database';
 import { MeasurementsService } from '../measurements/measurements.service';
 import type { AcquisitionMetadata, SweepRange } from '../device-plugins/core/acquisition';
 import { estimateAcquisitionSeconds } from '../device-plugins/core/acquisition';
-import { KronosGateway } from '../gateway/kronos.gateway';
+import { RealtimePublisher } from '@app/realtime';
 import { MEASUREMENTS_QUEUE } from '../queue/queue.constants';
 import { PrefDevices, sharesDevice } from './device-usage';
 import { ExperimentConfigService, ResolvedExperiment, toSweepRanges } from '../device-plugins/core/experiment-config.service';
@@ -69,7 +69,7 @@ export class MeasurementSchedulingService {
   constructor(
     private prisma: PrismaService,
     private measurementsService: MeasurementsService,
-    private kronosGateway: KronosGateway,
+    private realtime: RealtimePublisher,
     private experimentConfig: ExperimentConfigService,
     @Optional()
     @InjectQueue(MEASUREMENTS_QUEUE)
@@ -234,7 +234,7 @@ export class MeasurementSchedulingService {
         priority: PRIORITY_MANUAL, // los ScheduledJobs (priority 1) pasan primero
       });
 
-      this.kronosGateway.emitJobStatus(userId, {
+      this.realtime.jobStatus(userId, {
         jobId: String(job.id),
         taskId,
         status: 'queued',

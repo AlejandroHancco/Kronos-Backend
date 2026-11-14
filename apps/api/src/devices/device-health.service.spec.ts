@@ -13,7 +13,7 @@ describe('DeviceHealthService.checkAllDevices', () => {
       addresslessTypes: jest.fn().mockReturnValue(['sim-impedance']),
     };
     const gateway = {
-      emitDeviceStatusChanged: jest.fn(async (id: string) => {
+      deviceStatus: jest.fn(async (id: string) => {
         if (id === 'd1') throw new Error('db down');
       }),
     };
@@ -23,7 +23,7 @@ describe('DeviceHealthService.checkAllDevices', () => {
     await service.checkAllDevices();
 
     expect(prisma.device.update).toHaveBeenCalledTimes(7);
-    expect(gateway.emitDeviceStatusChanged).toHaveBeenCalledTimes(7);
+    expect(gateway.deviceStatus).toHaveBeenCalledTimes(7);
     expect(errorSpy).toHaveBeenCalledTimes(1);
   });
 
@@ -35,7 +35,7 @@ describe('DeviceHealthService.checkAllDevices', () => {
       },
     };
     const devicesService = { checkReachable: jest.fn().mockResolvedValue(true), addresslessTypes: jest.fn().mockReturnValue(['sim-impedance']) };
-    const gateway = { emitDeviceStatusChanged: jest.fn() };
+    const gateway = { deviceStatus: jest.fn() };
     await new DeviceHealthService(prisma as any, devicesService as any, gateway as any).checkAllDevices();
     expect(prisma.device.findMany.mock.calls[0][0].where).toEqual({
       status: { not: 'archived' },
@@ -53,7 +53,7 @@ describe('DeviceHealthService.checkAllDevices', () => {
       },
     };
     const devicesService = { checkReachable: jest.fn().mockResolvedValue(false), addresslessTypes: jest.fn().mockReturnValue([]) };
-    const gateway = { emitDeviceStatusChanged: jest.fn() };
+    const gateway = { deviceStatus: jest.fn() };
     await new DeviceHealthService(prisma as any, devicesService as any, gateway as any).checkAllDevices();
     expect(devicesService.checkReachable).toHaveBeenCalledWith('', '10.0.0.9');
     expect(prisma.device.update).toHaveBeenCalledWith({ where: { id: 'n1' }, data: { status: 'offline' } });

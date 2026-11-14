@@ -5,7 +5,7 @@ import type { Queue } from 'bull';
 import { PrismaService } from '@app/database';
 import { MeasurementsService } from '../measurements/measurements.service';
 import { ExperimentConfigService } from '../device-plugins/core/experiment-config.service';
-import { KronosGateway } from '../gateway/kronos.gateway';
+import { RealtimePublisher } from '@app/realtime';
 import { MEASUREMENTS_QUEUE } from '../queue/queue.constants';
 import {
   MeasurementSchedulingService,
@@ -35,7 +35,7 @@ export class SchedulerService {
     private prisma: PrismaService,
     private measurementsService: MeasurementsService,
     private schedulingService: MeasurementSchedulingService,
-    private kronosGateway: KronosGateway,
+    private realtime: RealtimePublisher,
     @Optional()
     @InjectQueue(MEASUREMENTS_QUEUE)
     private measurementQueue: Queue<MeasurementJobData> | undefined,
@@ -189,7 +189,7 @@ export class SchedulerService {
         .finally(() => this.schedulingService.untrackFallbackRun(payload.jobId));
     }
 
-    this.kronosGateway.emitJobStatus(job.createdBy, {
+    this.realtime.jobStatus(job.createdBy, {
       jobId: `scheduled-${job.id}`,
       taskId: job.taskId,
       status: 'processing',

@@ -15,14 +15,6 @@ import { getSocketUser, socketAuthMiddleware, WS_AUTH_ERROR } from '../auth/ws-s
 import { PASSWORD_CHANGED_MESSAGE } from '../auth/jwt-user';
 import { TeamScopeService, SessionEventsService } from '@app/common';
 
-export interface JobStatusPayload {
-  jobId: string;
-  taskId?: number;
-  status: 'queued' | 'processing' | 'completed' | 'failed' | 'retrying';
-  attempt?: number;
-  error?: string;
-}
-
 /**
  * Gateway principal de tiempo real (namespace /kronos).
  * Requiere `auth: { token }` en el handshake (mismas reglas que HTTP), verificado por un
@@ -134,32 +126,5 @@ export class KronosGateway
     const user = getSocketUser(socket);
     if (!user) return;
     socket.leave(`task:${Number(taskId)}`);
-  }
-
-  /** Emite a todos los clientes suscritos a la tarea cuando termina una medición */
-  emitMeasurementComplete(taskId: number, data: any) {
-    this.server.to(`task:${taskId}`).emit('measurement:complete', { taskId, ...data });
-    this.logger.log(`measurement:complete emitted to task:${taskId}`);
-  }
-
-  /** Notifica el estado del job (queued/processing/completed/failed/retrying) al usuario */
-  emitJobStatus(userId: string, status: JobStatusPayload) {
-    this.server.to(`user:${userId}`).emit('job:status', status);
-    this.logger.debug(`job:status ${status.status} emitted to user:${userId}`);
-  }
-
-  /** Notificación in-app en tiempo real */
-  emitNotification(userId: string, notification: any) {
-    this.server.to(`user:${userId}`).emit('notification', notification);
-    this.logger.log(`notification emitted to user:${userId}`);
-  }
-
-  /** Cambio de estado online/offline de un dispositivo: solo a los equipos del proyecto */
-  async emitDeviceStatusChanged(deviceId: string, projectId: string, status: string) {
-    const teamIds = await this.teamScope.teamIdsForProject(projectId);
-    for (const teamId of teamIds) {
-      this.server.to(`team:${teamId}`).emit('device:status', { deviceId, projectId, status });
-    }
-    this.logger.log(`device:status ${status} emitted for device ${deviceId} to ${teamIds.length} team(s)`);
   }
 }

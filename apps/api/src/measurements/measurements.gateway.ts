@@ -13,8 +13,6 @@ import { WsAuthService } from '../auth/ws-auth.service';
 import { getSocketUser, socketAuthMiddleware, WS_AUTH_ERROR } from '../auth/ws-socket';
 import { PASSWORD_CHANGED_MESSAGE } from '../auth/jwt-user';
 import { SessionEventsService } from '@app/common';
-import type { MeasurementValueMeta, StoredMeasurementPoint } from './measurement-data';
-import type { AcquisitionSnapshot } from '../device-plugins/core/acquisition';
 
 /**
  * Gateway de progreso de mediciones (namespace /measurements). Autentica en el handshake con un
@@ -83,72 +81,4 @@ export class MeasurementsGateway
     if (!user) return;
     socket.join(user.id);
   }
-
-  /**
-   * Emitir progreso de medición a usuario específico
-   * Se llama desde measurements.service.ts durante cada canal
-   */
-  emitMeasurementProgress(
-    userId: string,
-    jobId: string,
-    channel: number,
-    total: number,
-    progress: number,
-    message: string,
-  ) {
-    this.server.to(userId).emit('measurement:progress', {
-      jobId,
-      channel,
-      total,
-      percent: progress,
-      status: 'measuring',
-      message,
-    });
-    this.logger.debug(
-      `📊 Progress emitted - User: ${userId}, Channel: ${channel}/${total} (${progress}%)`,
-    );
-  }
-
-  /**
-   * Emitir finalización de medición
-   */
-  emitMeasurementCompleted(
-    userId: string,
-    jobId: string,
-    measurementId: number,
-    takenAt: Date,
-    totalPoints: number,
-    data: StoredMeasurementPoint[],
-    sensorValues: MeasurementValueMeta[],
-    acquisition: AcquisitionSnapshot,
-    channels: number[],
-  ) {
-    this.server.to(userId).emit('measurement:completed', {
-      jobId,
-      measurementId,
-      takenAt,
-      totalPoints,
-      data,
-      sensorValues,
-      acquisition,
-      channels,
-    });
-    this.logger.log(
-      `✅ Measurement completed - User: ${userId}, ID: ${measurementId}, Points: ${totalPoints}`,
-    );
-  }
-
-  /**
-   * Emitir error de medición
-   */
-  emitMeasurementError(userId: string, jobId: string, message: string) {
-    this.server.to(userId).emit('measurement:error', {
-      jobId,
-      message,
-    });
-    this.logger.error(
-      `❌ Measurement error - User: ${userId}, Message: ${message}`,
-    );
-  }
 }
-

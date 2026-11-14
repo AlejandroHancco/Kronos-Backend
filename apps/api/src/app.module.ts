@@ -24,6 +24,7 @@ import { ReportsModule } from './reports/reports.module';
 import { DevicePluginsModule } from './device-plugins/device-plugins.module';
 import { GatewayModule } from './gateway/gateway.module';
 import { RedisModule } from '@app/redis';
+import { RealtimeModule } from '@app/realtime';
 import { CommonModule } from '@app/common';
 import { RlsMiddleware } from './prisma/prisma.middleware';
 import { PrismaModule } from '@app/database';
@@ -45,6 +46,7 @@ import { PrismaModule } from '@app/database';
     CommonModule,
     DevicePluginsModule,
     RedisModule,
+    RealtimeModule,
     GatewayModule,
     AuthModule,
     UsersModule,
