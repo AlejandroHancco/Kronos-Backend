@@ -3,6 +3,7 @@ import { DEVICE_MODELS, LaasCatalog, experimentCatalog } from '@app/laas-catalog
 import { ExperimentCatalogService } from '../device-plugins/core/experiment-catalog.service';
 import { LaasSensorsController, parseChannels } from './laas-sensors.controller';
 import { LaasExperimentsController } from './laas-experiments.controller';
+import { LaasConfigurationController } from './laas-configuration.controller';
 
 const SENSOR = '11111111-1111-4111-8111-111111111111:hioki-im3570-lcr';
 
@@ -97,5 +98,17 @@ describe('LaasExperimentsController (Tabla 20)', () => {
     expect(e['x-available']).toBe(true);
     const sim = list.find((x) => x.experimentId === 'sim-impedance')!;
     expect(sim).toMatchObject({ sensors: [], actuators: [], 'x-available': false });
+  });
+});
+
+describe('LaasConfigurationController (dispositivos archivados → 404)', () => {
+  const DEV = '33333333-3333-4333-8333-333333333333';
+  it('getConfiguration / setConfiguration piden excludeArchived al DevicesService', async () => {
+    const devices = { configurationForUser: jest.fn(async () => ({})), configureForUser: jest.fn(async () => ({})) };
+    const ctrl = new LaasConfigurationController(devices as any);
+    await ctrl.getConfiguration(DEV, { id: 'u1' } as any);
+    await ctrl.setConfiguration(DEV, { values: { channel: 2 } } as any, { id: 'u1' } as any);
+    expect(devices.configurationForUser).toHaveBeenCalledWith(DEV, 'u1', { excludeArchived: true });
+    expect(devices.configureForUser).toHaveBeenCalledWith(DEV, { channel: 2 }, 'u1', { excludeArchived: true });
   });
 });

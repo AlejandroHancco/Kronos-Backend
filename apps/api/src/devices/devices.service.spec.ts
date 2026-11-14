@@ -102,6 +102,20 @@ describe('DevicesService (tipos por plugin)', () => {
     expect(prisma.device.findFirst).toHaveBeenLastCalledWith({ where: { id: 'd2', project: {} } });
   });
 
+  it('configuración LaaS (excludeArchived): 404 para un dispositivo archivado; /devices lo sigue sirviendo', async () => {
+    const { service, prisma, deviceConfiguration } = setup();
+    const archived = { id: 'd3', type: 'sim-impedance', status: 'archived' };
+    prisma.device.findFirst.mockResolvedValue(archived);
+    await expect(service.configurationForUser('d3', 'u1', { excludeArchived: true })).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.configureForUser('d3', { rp: 1 }, 'u1', { excludeArchived: true })).rejects.toBeInstanceOf(NotFoundException);
+    expect(deviceConfiguration.view).not.toHaveBeenCalled();
+    expect(deviceConfiguration.apply).not.toHaveBeenCalled();
+    await service.configurationForUser('d3', 'u1');
+    await service.configureForUser('d3', { rp: 1 }, 'u1');
+    expect(deviceConfiguration.view).toHaveBeenCalledWith(archived);
+    expect(deviceConfiguration.apply).toHaveBeenCalledWith(archived, { rp: 1 });
+  });
+
   describe('updateInProject (tipo bloqueado si está en uso)', () => {
     it('rechaza cambiar el tipo si alguna configuración de tarea usa el dispositivo', async () => {
       const { service, prisma } = setup();

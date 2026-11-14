@@ -7,7 +7,10 @@ import { DevicesService } from '../devices/devices.service';
 import { SetDeviceConfigurationDto } from '../devices/dto/set-device-configuration.dto';
 import { permissionOf } from './laas-operations';
 
-/** getConfiguration / setConfiguration por dispositivo: mismos servicios que /devices/:id/configuration. */
+/**
+ * getConfiguration / setConfiguration por dispositivo: mismos servicios que /devices/:id/configuration,
+ * salvo que un dispositivo archivado responde 404 (como el resto de /laas/v1).
+ */
 @Controller('laas/v1/configuration')
 @UseGuards(CombinedAuthGuard, PermissionGuard)
 export class LaasConfigurationController {
@@ -16,7 +19,7 @@ export class LaasConfigurationController {
   @Get(':deviceId')
   @RequirePermission(permissionOf('getConfiguration'))
   getConfiguration(@Param('deviceId', ParseUUIDPipe) deviceId: string, @CurrentUser() user: NormalizedUser) {
-    return this.devices.configurationForUser(deviceId, user.id);
+    return this.devices.configurationForUser(deviceId, user.id, { excludeArchived: true });
   }
 
   @Put(':deviceId')
@@ -26,6 +29,6 @@ export class LaasConfigurationController {
     @Body() dto: SetDeviceConfigurationDto,
     @CurrentUser() user: NormalizedUser,
   ) {
-    return this.devices.configureForUser(deviceId, dto.values, user.id);
+    return this.devices.configureForUser(deviceId, dto.values, user.id, { excludeArchived: true });
   }
 }

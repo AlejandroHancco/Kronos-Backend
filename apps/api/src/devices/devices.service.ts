@@ -11,6 +11,10 @@ import { DeviceOpsClient } from '@app/queue';
 import { DeviceConfigurationService } from './device-configuration.service';
 import { deviceTestTimeoutMs } from './device-op-errors';
 
+export interface DeviceLookupOptions {
+  excludeArchived?: boolean;
+}
+
 @Injectable()
 export class DevicesService {
   constructor(
@@ -184,21 +188,22 @@ export class DevicesService {
   }
 
   /** Dispositivo de un proyecto del equipo del usuario, o 404. */
-  private async findForUser(deviceId: string, userId: string): Promise<Device> {
+  /** `excludeArchived`: las rutas LaaS no exponen dispositivos archivados (404); /devices sí. */
+  private async findForUser(deviceId: string, userId: string, opts: DeviceLookupOptions = {}): Promise<Device> {
     const teamWhere = await this.teamScope.projectWhereForUser(userId);
     const device = await this.prisma.device.findFirst({ where: { id: deviceId, project: teamWhere } });
-    if (!device) throw new NotFoundException('Device not found');
+    if (!device || (opts.excludeArchived && device.status === 'archived')) throw new NotFoundException('Device not found');
     return device;
   }
 
   /** getConfiguration: parámetros declarados por el plugin con su valor actual. */
-  async configurationForUser(deviceId: string, userId: string) {
-    return this.deviceConfiguration.view(await this.findForUser(deviceId, userId));
+  async configurationForUser(deviceId: string, userId: string, opts: DeviceLookupOptions = {}) {
+    return this.deviceConfiguration.view(await this.findForUser(deviceId, userId, opts));
   }
 
   /** setConfiguration: valida, aplica en vivo y/o guarda; rechazado mientras el dispositivo mide. */
-  async configureForUser(deviceId: string, values: Record<string, unknown>, userId: string) {
-    return this.deviceConfiguration.apply(await this.findForUser(deviceId, userId), values);
+  async configureForUser(deviceId: string, values: Record<string, unknown>, userId: string, opts: DeviceLookupOptions = {}) {
+    return this.deviceConfiguration.apply(await this.findForUser(deviceId, userId, opts), values);
   }
 
   /** Service description (IEEE 1876 §4.2) + metadata de instancia para un dispositivo del equipo del usuario. */
