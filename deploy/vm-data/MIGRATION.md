@@ -23,7 +23,9 @@ Supabase and users are linked by email/UUID already present in `public`.
    The script (a) lists policies, functions and views in `public` that reference schema `auth`
    and stops (exit 1) unless `--force` is passed, (b) runs
    `pg_dump -Fc --no-owner --no-acl -n public`, (c) runs `pg_restore --no-owner --no-acl`,
-   (d) compares row counts per table and exits 1 on any mismatch. The source is only read
+   (d) compares row counts per table and exits 1 on any mismatch. It also aborts if the target
+   `public` schema already has tables, and fails on any `pg_restore` error other than
+   `schema "public" already exists` unless `--force` is given. The source is only read
    (read-only session queries and `pg_dump`).
 3. **Review `auth` warnings.** If the script warned about RLS policies / functions using
    `auth.uid()`, decide whether they are needed on vm-data (they would fail there, since the

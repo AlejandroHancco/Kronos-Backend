@@ -43,7 +43,14 @@ src_psql -c "SELECT 'POLICY   ' || schemaname || '.' || tablename || ' :: ' || p
                AND (coalesce(qual,'') ILIKE '%auth.%' OR coalesce(with_check,'') ILIKE '%auth.%')" >> "$WARN"
 src_psql -c "SELECT 'FUNCTION ' || n.nspname || '.' || p.proname
              FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-             WHERE n.nspname = 'public' AND p.prokind IN ('f','p') AND p.prosrc ILIKE '%auth.%'" >> "$WARN"
+             WHERE n.nspname = 'public' AND p.prokind IN ('f','p')
+               AND (p.prosrc ILIKE '%auth.%' OR coalesce(p.prosqlbody::text,'') ILIKE '%auth.%')" >> "$WARN"
+src_psql -c "SELECT 'DEFAULT  ' || c.relname || '.' || a.attname
+             FROM pg_attrdef d
+             JOIN pg_class c ON c.oid = d.adrelid
+             JOIN pg_namespace n ON n.oid = c.relnamespace
+             JOIN pg_attribute a ON a.attrelid = d.adrelid AND a.attnum = d.adnum
+             WHERE n.nspname = 'public' AND pg_get_expr(d.adbin, d.adrelid) ILIKE '%auth.%'" >> "$WARN"
 src_psql -c "SELECT 'VIEW     ' || schemaname || '.' || viewname
              FROM pg_views
              WHERE schemaname = 'public' AND definition ILIKE '%auth.%'" >> "$WARN"
@@ -60,6 +67,13 @@ else
   echo "    none found"
 fi
 
+# --- (1b) Target must have no tables in public --------------------------------------------
+TGT_TABLES="$(dst_psql -c "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'")"
+if [ "$TGT_TABLES" -ne 0 ]; then
+  echo "ERROR: TARGET schema public already has $TGT_TABLES table(s); it must be empty. Aborting." >&2
+  exit 1
+fi
+
 # --- (2) Dump ---------------------------------------------------------------------------------
 DUMP="$WORK/public.dump"
 echo "==> [2/4] pg_dump -Fc (schema public) from SOURCE"
@@ -67,13 +81,26 @@ pg_dump -Fc --no-owner --no-acl -n public -f "$DUMP" "$SOURCE_URL"
 
 # --- (3) Restore ------------------------------------------------------------------------------
 echo "==> [3/4] pg_restore into TARGET"
+RESTORE_ERR="$WORK/restore.err"
 set +e
-pg_restore --no-owner --no-acl -d "$TARGET_URL" "$DUMP"
+pg_restore --no-owner --no-acl -d "$TARGET_URL" "$DUMP" 2> "$RESTORE_ERR"
 RC=$?
 set -e
+cat "$RESTORE_ERR" >&2
 if [ "$RC" -ne 0 ]; then
-  echo "WARNING: pg_restore exited $RC (commonly harmless, e.g. 'schema \"public\" already exists')." >&2
-  echo "         Row-count verification below decides success." >&2
+  # Tolerate only the known benign error: schema "public" already exists.
+  UNEXPECTED="$(grep -E 'ERROR:' "$RESTORE_ERR" | grep -v 'schema "public" already exists' || true)"
+  if [ -n "$UNEXPECTED" ]; then
+    echo "ERROR: pg_restore reported unexpected errors:" >&2
+    echo "$UNEXPECTED" | sed 's/^/  /' >&2
+    if [ "$FORCE" -ne 1 ]; then
+      echo "Stopping (schema may be incomplete: constraints, indexes, FKs, defaults). Use --force to continue anyway." >&2
+      exit 1
+    fi
+    echo "--force given: continuing despite restore errors." >&2
+  else
+    echo "NOTE: pg_restore exited $RC only because schema \"public\" already exists (benign)." >&2
+  fi
 fi
 
 # --- (4) Verify row counts --------------------------------------------------------------------
@@ -88,6 +115,10 @@ count_rows() { # $1 = psql function name
 }
 count_rows src_psql > "$WORK/src.counts"
 count_rows dst_psql > "$WORK/dst.counts"
+if [ ! -s "$WORK/src.counts" ]; then
+  echo "ERROR: SOURCE has no tables in public; nothing to verify." >&2
+  exit 1
+fi
 
 if diff -u --label SOURCE --label TARGET "$WORK/src.counts" "$WORK/dst.counts"; then
   echo "OK: row counts match on all $(wc -l < "$WORK/src.counts" | tr -d ' ') tables."
