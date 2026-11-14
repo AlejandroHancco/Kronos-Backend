@@ -64,4 +64,18 @@ describe('DeviceStateService', () => {
     expect(await redis.exists('lock:device:m')).toBe(0);
     await expect(state.withExclusive({ id: 'm', name: 'MUX' }, async () => 1)).resolves.toBe(1);
   });
+
+  it('withExclusive: renueva el lock mientras fn supera el TTL y limpia el timer', async () => {
+    const state = make();
+    state.ttlMs = 100;
+    state.renewEveryMs = 30;
+    const clear = jest.spyOn(global, 'clearInterval');
+    await state.withExclusive({ id: 'm', name: 'MUX' }, async () => {
+      await new Promise((r) => setTimeout(r, 350));
+      expect(await redis.exists('lock:device:m')).toBe(1);
+    });
+    expect(clear).toHaveBeenCalled();
+    expect(await redis.exists('lock:device:m')).toBe(0);
+    clear.mockRestore();
+  });
 });

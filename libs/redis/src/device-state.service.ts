@@ -1,10 +1,11 @@
-import { ConflictException, Inject, Injectable } from '@nestjs/common';
+import { ConflictException, Inject, Injectable, Logger } from '@nestjs/common';
 import type Redis from 'ioredis';
 import { PrismaService, runningJobDeviceIds } from '@app/database';
 import { REDIS_CLIENT } from './redis.constants';
 import { RedisLockService } from './redis-lock.service';
 
 const EXCLUSIVE_TTL_MS = 60_000;
+const EXCLUSIVE_RENEW_MS = 20_000;
 
 /**
  * Estado de ocupación de los dispositivos compartido entre procesos: una medición mantiene
@@ -12,6 +13,11 @@ const EXCLUSIVE_TTL_MS = 60_000;
  */
 @Injectable()
 export class DeviceStateService {
+  private readonly logger = new Logger(DeviceStateService.name);
+  /** Sobrescribibles en tests. */
+  ttlMs = EXCLUSIVE_TTL_MS;
+  renewEveryMs = EXCLUSIVE_RENEW_MS;
+
   constructor(
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
     private readonly locks: RedisLockService,
@@ -27,13 +33,22 @@ export class DeviceStateService {
   /** Ejecuta fn con el lock del dispositivo; 409 si ya está tomado (midiendo o configurándose). */
   async withExclusive<T>(device: { id: string; name: string }, fn: () => Promise<T>): Promise<T> {
     const key = `lock:device:${device.id}`;
-    const token = await this.locks.tryAcquire(key, EXCLUSIVE_TTL_MS);
+    const token = await this.locks.tryAcquire(key, this.ttlMs);
     if (!token) {
       throw new ConflictException(`"${device.name}" está midiendo; espera a que termine para cambiar su configuración`);
     }
+    const timer = setInterval(() => {
+      this.locks
+        .renew(key, token, this.ttlMs)
+        .then((ok) => {
+          if (!ok) this.logger.warn(`Device lock ${key} lost before renewal`);
+        })
+        .catch((e: Error) => this.logger.warn(`Renew of ${key} failed: ${e.message}`));
+    }, this.renewEveryMs);
     try {
       return await fn();
     } finally {
+      clearInterval(timer);
       await this.locks.release(key, token);
     }
   }
