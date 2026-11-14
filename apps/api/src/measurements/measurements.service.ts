@@ -7,8 +7,9 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { classifyMeasurement, MeasurementClassification } from './kronos-watcher';
 import { ExperimentConfigService } from '../device-plugins/core/experiment-config.service';
 import { DeviceActivityService } from '../device-plugins/core/device-activity.service';
-import type { MeasuredPoint } from '../device-plugins/core/device-plugin.interface';
-import { requestsFor, snapshotOf, type SweepRange } from '../device-plugins/core/acquisition';
+import { requestsFor, snapshotOf, type MeasuredPoint, type SweepRange } from '@app/laas-catalog';
+// Intermedio: la medición pasa al worker en tareas posteriores.
+import { DeviceDriverRegistry } from '@app/device-drivers';
 import { CreateMeasurementDto } from './dto/create-measurement.dto';
 import {
   buildMeasurementData,
@@ -56,6 +57,7 @@ export class MeasurementsService {
       private notificationsService: NotificationsService,
       private experimentConfig: ExperimentConfigService,
       private deviceActivity: DeviceActivityService,
+      private drivers: DeviceDriverRegistry,
   ) {}
 
   /** Notifica al equipo del resultado de una medición (según clasificación del Kronos Watcher), sin romper el flujo si falla. */
@@ -242,6 +244,8 @@ export class MeasurementsService {
       // 1b. Rangos de barrido contra lo que declara el sensor (frecuencia, puntos, escala)
       this.experimentConfig.assertRanges(resolved, params.ranges);
       const selectorDevice = taskPreference.channelSelectorDevice;
+      const sensorDriver = this.drivers.sensor(taskPreference.sensorDevice.type);
+      const selectorDriver = selector ? this.drivers.actuator(selectorDevice?.type) : null;
       const valueNames = valueMetas.map((v) => v.name);
       deviceNames = [sensor.context.name, selector?.context.name].filter((n): n is string => !!n);
       // Ocupa los dispositivos (espera a un cambio de configuración en curso) hasta terminar
@@ -278,13 +282,13 @@ export class MeasurementsService {
         try {
           // 3a. Activar el canal en el selector (setActuatorData) si la configuración tiene uno
           if (selector) {
-            await selector.plugin.setActuatorData(selector.context, selector.actuatorId, { [selector.valueName]: channel });
+            await selectorDriver!.setActuatorData(selector.context, selector.actuatorId, { [selector.valueName]: channel });
           }
 
           // 3b. Medir todos los rangos para este canal (getSensorData del equipo de medición)
           const points: MeasuredPoint[] = [];
           for (const request of requestsFor(acquisition, params.ranges)) {
-            points.push(...await sensor.plugin.getSensorData(sensor.context, request));
+            points.push(...await sensorDriver.getSensorData(sensor.context, request));
           }
 
           this.logger.log(

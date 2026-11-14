@@ -6,7 +6,9 @@ import { CreateDeviceDto } from './dto/create-device.dto';
 import { UpdateDeviceDto } from './dto/update-device.dto';
 import { UpdateDeviceStatusDto } from './dto/update-device-status.dto';
 import { TestConnectionDto } from './dto/test-connection.dto';
-import { DevicePluginRegistry, DeviceTypeCatalogEntry } from '../device-plugins/core/device-plugin.registry';
+import { DeviceTypeCatalogEntry, LaasCatalog } from '@app/laas-catalog';
+// Intermedio: test-connection / health check pasan al worker en tareas posteriores.
+import { DeviceDriverRegistry } from '@app/device-drivers';
 import { DeviceConfigurationService } from '../device-plugins/core/device-configuration.service';
 
 @Injectable()
@@ -14,7 +16,8 @@ export class DevicesService {
   constructor(
       private prisma: PrismaService,
       private teamScope: TeamScopeService,
-      private devicePlugins: DevicePluginRegistry,
+      private catalog: LaasCatalog,
+      private drivers: DeviceDriverRegistry,
       private deviceConfiguration: DeviceConfigurationService,
   ) {}
 
@@ -63,14 +66,14 @@ export class DevicesService {
 
   /** Tipo de dispositivo según el catálogo de plugins registrados (IEEE 1876 §4). */
   catalogEntry(type: string | null | undefined): DeviceTypeCatalogEntry {
-    const entry = this.devicePlugins.catalog().find((e) => e.deviceType === type);
+    const entry = this.catalog.catalog().find((e) => e.deviceType === type);
     if (!entry) throw new BadRequestException(`Tipo de dispositivo desconocido: "${type}"`);
     return entry;
   }
 
   /** Tipos de dispositivo que no requieren IP (ej. simulados), usado por el health check. */
   addresslessTypes(): string[] {
-    return this.devicePlugins.catalog().filter((e) => !e.connection.requiresIp).map((e) => e.deviceType);
+    return this.catalog.catalog().filter((e) => !e.connection.requiresIp).map((e) => e.deviceType);
   }
 
   async createInProject(projectId: string, createDeviceDto: CreateDeviceDto, userId: string) {
@@ -175,14 +178,14 @@ export class DevicesService {
 
   /**
    * Chequeo crudo de alcanzabilidad (sin mensajes), usado también por el health check
-   * periódico. Delega en el plugin registrado para `type` — un dispositivo nuevo
-   * (type distinto) queda cubierto automáticamente con solo registrar su plugin.
+   * periódico. Delega en el driver registrado para `type` — un dispositivo nuevo
+   * (type distinto) queda cubierto automáticamente con solo registrar su modelo y su driver.
    */
   async checkReachable(type: string, ip: string | null, port?: number): Promise<boolean> {
-    if (!this.devicePlugins.has(type)) return false;
-    const entry = this.devicePlugins.catalog().find((e) => e.deviceType === type)!;
+    if (!this.catalog.has(type) || !this.drivers.has(type)) return false;
+    const entry = this.catalog.catalog().find((e) => e.deviceType === type)!;
     if (entry.connection.requiresIp && !ip) return false;
-    return this.devicePlugins.get(type).testConnection({ ip, port: port ?? entry.connection.defaultPort });
+    return this.drivers.get(type).testConnection({ ip, port: port ?? entry.connection.defaultPort });
   }
 
   /** Dispositivo de un proyecto del equipo del usuario, o 404. */
@@ -207,9 +210,9 @@ export class DevicesService {
   async describeForUser(deviceId: string, userId: string) {
     const { id, name, type, ip, status, projectId } = await this.findForUser(deviceId, userId);
     const device = { id, name, type, ip, status, projectId };
-    const role = this.devicePlugins.role(device.type);
+    const role = this.catalog.role(device.type);
     if (!role) throw new NotFoundException(`No hay un device plugin registrado para el tipo "${device.type}"`);
-    let service = this.devicePlugins.describe(device.type!);
+    let service = this.catalog.describe(device.type!);
     if (role === 'sensor') {
       // Aproximación: mediciones de tareas cuya preferencia ACTUAL usa este dispositivo.
       const last = await this.prisma.measurement.findFirst({

@@ -1,17 +1,14 @@
 import { BadRequestException } from '@nestjs/common';
 import { ExperimentConfigService } from './experiment-config.service';
-import { DevicePluginRegistry } from './device-plugin.registry';
-import { HiokiIm3570Plugin } from '../plugins/hioki-im3570/hioki-im3570.plugin';
-import { KronosMux16Plugin } from '../plugins/kronos-mux-16/kronos-mux-16.plugin';
-import { SimulatedImpedancePlugin } from '../plugins/sim-impedance/sim-impedance.plugin';
+import { HIOKI_IM3570, KRONOS_MUX_16, LaasCatalog, SIM_IMPEDANCE } from '@app/laas-catalog';
 
-const registry = new DevicePluginRegistry([new HiokiIm3570Plugin(), new KronosMux16Plugin(), new SimulatedImpedancePlugin()]);
+const catalog = new LaasCatalog([HIOKI_IM3570, KRONOS_MUX_16, SIM_IMPEDANCE]);
 const device = (id: string, type: string | null, configuration: unknown = null) =>
   ({ id, name: `Dev ${id}`, type, ip: '10.0.0.1', projectId: 'P', configuration });
 const serviceWith = (sensorDevice: unknown, channelSelectorDevice: unknown) =>
   new ExperimentConfigService({
     taskPreference: { findFirst: jest.fn(async () => ({ id: 1, name: 'cfg', sensorDevice, channelSelectorDevice, ranges: [] })) },
-  } as any, registry);
+  } as any, catalog);
 
 describe('ExperimentConfigService.assertValidConfig (rangos por sensor)', () => {
   const hioki = device('s', 'hioki-im3570');
@@ -22,7 +19,7 @@ describe('ExperimentConfigService.assertValidConfig (rangos por sensor)', () => 
         findUnique: jest.fn(async ({ where: { id } }: { where: { id: string } }) =>
           id === (sensorDevice as any)?.id ? sensorDevice : channelSelectorDevice),
       },
-    } as any, registry);
+    } as any, catalog);
 
   it('rechaza un rango fuera de la frecuencia del Hioki', async () => {
     await expect(
@@ -50,12 +47,14 @@ describe('ExperimentConfigService.assertValidConfig (rangos por sensor)', () => 
 });
 
 describe('ExperimentConfigService.resolve', () => {
-  it('sensor + selector: plugins, contextos con configuración efectiva y rango del selector', async () => {
+  it('sensor + selector: descripciones (sin drivers), contextos con configuración efectiva y rango del selector', async () => {
     const r = (await serviceWith(device('s', 'sim-impedance', { rp: 40000 }), device('m', 'kronos-mux-16')).resolve(7))!;
-    expect(r.sensor.plugin).toBe(registry.get('sim-impedance'));
+    expect(r.sensor.description).toBe(catalog.describe('sim-impedance'));
+    expect(r.sensor).not.toHaveProperty('plugin');
     expect(r.sensor.context).toEqual({ id: 's', name: 'Dev s', ip: '10.0.0.1', configuration: { rs: 150, rp: 40000, c: 2, noisePercent: 0.5 } });
     expect(r.selector).toMatchObject({ actuatorId: 'kronos-mux-16-channel', valueName: 'channel', context: { id: 'm', configuration: {} } });
-    expect(r.selector!.plugin).toBe(registry.get('kronos-mux-16'));
+    expect(r.selector!.description).toBe(catalog.describe('kronos-mux-16'));
+    expect(r.selector).not.toHaveProperty('plugin');
     expect(r.channelRange).toEqual({ min: 1, max: 16 });
     expect(r.valueMetas.map((v) => v.name)).toEqual(['z']);
     expect(r.experiment.fullName).toBe('Simulador (Randles) + MUX Kronos 16');

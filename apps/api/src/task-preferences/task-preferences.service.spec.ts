@@ -1,9 +1,6 @@
 import { TaskPreferencesService } from './task-preferences.service';
 import { ExperimentConfigService } from '../device-plugins/core/experiment-config.service';
-import { DevicePluginRegistry } from '../device-plugins/core/device-plugin.registry';
-import { HiokiIm3570Plugin } from '../device-plugins/plugins/hioki-im3570/hioki-im3570.plugin';
-import { KronosMux16Plugin } from '../device-plugins/plugins/kronos-mux-16/kronos-mux-16.plugin';
-import { SimulatedImpedancePlugin } from '../device-plugins/plugins/sim-impedance/sim-impedance.plugin';
+import { HIOKI_IM3570, KRONOS_MUX_16, LaasCatalog, SIM_IMPEDANCE } from '@app/laas-catalog';
 
 const device = (id: string, type: string) => ({ id, name: id, type, ip: null, projectId: 'P' });
 const savedPref = (analyzer: ReturnType<typeof device>, mux: ReturnType<typeof device> | null) => ({
@@ -12,7 +9,7 @@ const savedPref = (analyzer: ReturnType<typeof device>, mux: ReturnType<typeof d
 });
 
 function setup(pref: ReturnType<typeof savedPref> | null) {
-  const registry = new DevicePluginRegistry([new HiokiIm3570Plugin(), new KronosMux16Plugin(), new SimulatedImpedancePlugin()]);
+  const catalog = new LaasCatalog([HIOKI_IM3570, KRONOS_MUX_16, SIM_IMPEDANCE]);
   const prisma = {
     taskPreference: {
       findUnique: jest.fn(async () => pref),
@@ -27,7 +24,7 @@ function setup(pref: ReturnType<typeof savedPref> | null) {
       ]),
     },
   };
-  const experimentConfig = new ExperimentConfigService(prisma as any, registry);
+  const experimentConfig = new ExperimentConfigService(prisma as any, catalog);
   jest.spyOn(experimentConfig, 'assertValidConfig').mockResolvedValue(undefined);
   const teamScope = { assertTaskInTeam: jest.fn() };
   return { service: new TaskPreferencesService(prisma as any, teamScope as any, experimentConfig), prisma };

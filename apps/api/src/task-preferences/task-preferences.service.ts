@@ -3,8 +3,8 @@ import { Device, Prisma, TaskPreference } from '@prisma/client';
 import { PrismaService } from '@app/database';
 import { TeamScopeService } from '@app/common';
 import { ExperimentConfigService, toSweepRanges } from '../device-plugins/core/experiment-config.service';
-import { invalidChannels } from '../device-plugins/core/experiment-config';
-import { SweepRange } from '../device-plugins/core/acquisition';
+import { invalidChannels } from '@app/laas-catalog';
+import { SweepRange } from '@app/laas-catalog';
 import { CreateTaskPreferenceDto, TaskPreferenceRangeDto } from './dto/create-task-preference.dto';
 import { UpdateTaskPreferenceDto } from './dto/update-task-preference.dto';
 

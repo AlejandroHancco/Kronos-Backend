@@ -1,6 +1,6 @@
-import type { MeasuredPoint } from '../device-plugins/core/device-plugin.interface';
-import type { AcquisitionSnapshot } from '../device-plugins/core/acquisition';
-import { CHANNEL_SLOTS, type MeasurementValueMeta } from '../device-plugins/core/experiment-config';
+import type { MeasuredPoint } from '@app/laas-catalog';
+import type { AcquisitionSnapshot } from '@app/laas-catalog';
+import { CHANNEL_SLOTS, type MeasurementValueMeta } from '@app/laas-catalog';
 export { CHANNEL_SLOTS, type MeasurementValueMeta };
 
 /** Formato de Measurement.data: por valor de la variable (`x`; sin `x` en lecturas puntuales), 16 slots por sensorValue. */

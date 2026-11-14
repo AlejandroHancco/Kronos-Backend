@@ -1,27 +1,35 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Device, Prisma, TaskPreference, TaskPreferenceRange } from '@prisma/client';
 import { PrismaService } from '@app/database';
-import { DevicePluginRegistry } from './device-plugin.registry';
-import type { ActuatorPlugin, DeviceContext, DeviceServiceDescription, SensorPlugin } from './device-plugin.interface';
-import { toDeviceContext } from './configuration';
-import { AcquisitionMetadata, acquisitionOf, rangesError, SweepRange } from './acquisition';
 import {
+  AcquisitionMetadata,
   ChannelRange,
+  DeviceContext,
+  DeviceServiceDescription,
+  ExperimentDefinition,
+  LaasCatalog,
   MeasurementValueMeta,
+  SweepRange,
+  acquisitionOf,
   channelRangeFor,
-  experimentConfigError,
-  invalidChannels,
   channelRangeMessage,
+  experimentConfigError,
+  experimentFor,
+  invalidChannels,
+  rangesError,
+  toDeviceContext,
   typeLabel,
   valueMetasOf,
-} from './experiment-config';
-import { ExperimentDefinition, experimentFor } from './experiments';
+} from '@app/laas-catalog';
 
+/**
+ * Experimento activo de una tarea, resuelto solo con metadata del catálogo (sin drivers): quien
+ * ejecuta la medición resuelve los drivers por el tipo de cada dispositivo.
+ */
 export interface ResolvedExperiment {
   preference: TaskPreference & { sensorDevice: Device; channelSelectorDevice: Device | null; ranges: TaskPreferenceRange[] };
-  sensor: { plugin: SensorPlugin; description: DeviceServiceDescription; context: DeviceContext };
+  sensor: { description: DeviceServiceDescription; context: DeviceContext };
   selector: {
-    plugin: ActuatorPlugin;
     description: DeviceServiceDescription;
     context: DeviceContext;
     actuatorId: string;
@@ -42,7 +50,7 @@ export const toSweepRanges = (rows: { start: Prisma.Decimal | number; stop: Pris
 
 @Injectable()
 export class ExperimentConfigService {
-  constructor(private prisma: PrismaService, private registry: DevicePluginRegistry) {}
+  constructor(private prisma: PrismaService, private catalog: LaasCatalog) {}
 
   async assertValidConfig(taskId: number, sensorDeviceId: string, channelSelectorDeviceId: string | null, ranges: SweepRange[]): Promise<void> {
     const task = await this.prisma.task.findUnique({ where: { id: taskId }, select: { projectId: true } });
@@ -51,17 +59,17 @@ export class ExperimentConfigService {
     if (!sensor) throw new NotFoundException('Equipo de medición no encontrado');
     const selector = channelSelectorDeviceId ? await this.prisma.device.findUnique({ where: { id: channelSelectorDeviceId } }) : null;
     if (channelSelectorDeviceId && !selector) throw new NotFoundException('Selector de canal no encontrado');
-    const sensorRole = this.registry.role(sensor.type);
+    const sensorRole = this.catalog.role(sensor.type);
     const error = experimentConfigError({
       taskProjectId: task.projectId,
       sensor,
       selector,
       sensorRole,
-      selectorRole: selector ? this.registry.role(selector.type) : undefined,
-      sensorDescription: sensorRole === 'sensor' ? this.registry.describe(sensor.type!) : undefined,
+      selectorRole: selector ? this.catalog.role(selector.type) : undefined,
+      sensorDescription: sensorRole === 'sensor' ? this.catalog.describe(sensor.type!) : undefined,
     });
     if (error) throw new BadRequestException(error);
-    const d = this.registry.describe(sensor.type!);
+    const d = this.catalog.describe(sensor.type!);
     const rangeError = rangesError(acquisitionOf(d)!, ranges, d.shortName);
     if (rangeError) throw new BadRequestException(rangeError);
   }
@@ -72,7 +80,7 @@ export class ExperimentConfigService {
     if (error) throw new BadRequestException(error);
   }
 
-  /** Experimento activo de la tarea: plugin y contexto del sensor y, si hay, del selector de canal. */
+  /** Experimento activo de la tarea: descripción y contexto del sensor y, si hay, del selector de canal. */
   async resolve(taskId: number): Promise<ResolvedExperiment | null> {
     const preference = await this.prisma.taskPreference.findFirst({
       where: { taskId }, orderBy: { createdAt: 'desc' },
@@ -81,21 +89,19 @@ export class ExperimentConfigService {
     if (!preference) return null;
     const s = preference.sensorDevice;
     const m = preference.channelSelectorDevice;
-    if (this.registry.role(s.type) !== 'sensor') throw new BadRequestException(mismatch(s, 'un equipo de medición'));
-    if (m && this.registry.role(m.type) !== 'channel-selector') throw new BadRequestException(mismatch(m, 'un selector de canal'));
+    if (this.catalog.role(s.type) !== 'sensor') throw new BadRequestException(mismatch(s, 'un equipo de medición'));
+    if (m && this.catalog.role(m.type) !== 'channel-selector') throw new BadRequestException(mismatch(m, 'un selector de canal'));
 
-    const sensorDescription = this.registry.describe(s.type!);
+    const sensorDescription = this.catalog.describe(s.type!);
     const sensor = {
-      plugin: this.registry.sensor(s.type),
       description: sensorDescription,
       context: toDeviceContext(s, sensorDescription),
     };
     let selector: ResolvedExperiment['selector'] = null;
     if (m) {
-      const cs = this.registry.channelSelector(m.type);
-      const description = this.registry.describe(m.type!);
+      const cs = this.catalog.channelSelector(m.type);
+      const description = this.catalog.describe(m.type!);
       selector = {
-        plugin: cs.plugin,
         description,
         context: toDeviceContext(m, description),
         actuatorId: cs.actuatorId,
@@ -108,7 +114,7 @@ export class ExperimentConfigService {
       selector,
       channelRange: channelRangeFor(selector?.description ?? null),
       valueMetas: valueMetasOf(sensorDescription),
-      experiment: experimentFor(this.registry.catalog(), s.type, m?.type ?? null)!,
+      experiment: experimentFor(this.catalog.catalog(), s.type, m?.type ?? null)!,
       acquisition: acquisitionOf(sensorDescription)!,
     };
   }
@@ -121,17 +127,17 @@ export class ExperimentConfigService {
     return resolved;
   }
 
-  /** Para mostrar (GET /tasks/:id): nunca lanza; tipos sin plugin o con rol incorrecto caen a valores por defecto. */
+  /** Para mostrar (GET /tasks/:id): nunca lanza; tipos sin modelo en el catálogo o con rol incorrecto caen a valores por defecto. */
   summarize(pref: { sensorDevice: { type: string | null }; channelSelectorDevice: { type: string | null } | null }) {
     const m = pref.channelSelectorDevice;
-    const selectorDescription = m && this.registry.role(m.type) === 'channel-selector' ? this.registry.describe(m.type!) : null;
+    const selectorDescription = m && this.catalog.role(m.type) === 'channel-selector' ? this.catalog.describe(m.type!) : null;
     const channelRange = channelRangeFor(selectorDescription);
-    const found = experimentFor(this.registry.catalog(), pref.sensorDevice.type, m?.type ?? null);
+    const found = experimentFor(this.catalog.catalog(), pref.sensorDevice.type, m?.type ?? null);
     const experiment = found ? { experimentId: found.experimentId, fullName: found.fullName } : null;
-    if (this.registry.role(pref.sensorDevice.type) !== 'sensor') {
+    if (this.catalog.role(pref.sensorDevice.type) !== 'sensor') {
       return { channelRange, sensorValues: [], simulated: false, experiment, acquisition: null };
     }
-    const d = this.registry.describe(pref.sensorDevice.type!);
+    const d = this.catalog.describe(pref.sensorDevice.type!);
     return { channelRange, sensorValues: valueMetasOf(d), simulated: d.simulated, experiment, acquisition: acquisitionOf(d) };
   }
 }

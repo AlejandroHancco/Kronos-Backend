@@ -1,8 +1,7 @@
 import { Global, Module } from '@nestjs/common';
-import { DevicePluginRegistry } from './core/device-plugin.registry';
-import { DevicePlugin } from './core/device-plugin.interface';
-import { DEVICE_PLUGIN_INSTANCES } from './core/device-plugin.tokens';
-import { DEVICE_PLUGINS } from './plugins';
+import { LaasCatalogModule } from '@app/laas-catalog';
+// Intermedio: la API aún hace E/S (medición, test-connection, configuración live) hasta que pase al worker.
+import { DeviceDriversModule } from '@app/device-drivers';
 import { DevicePluginsController } from './device-plugins.controller';
 import { PrismaModule } from '@app/database';
 import { PermissionsModule } from '../permissions/permissions.module';
@@ -14,30 +13,24 @@ import { ExperimentsController, ProjectExperimentsController } from './core/expe
 import { CommonModule } from '@app/common';
 
 /**
- * Módulo del Kronos Watcher dedicado a dispositivos: registra los plugins de cada
- * tipo de dispositivo soportado (ver core/device-plugin.interface.ts). Global para que
+ * Módulo del Kronos Watcher dedicado a dispositivos: expone el catálogo LaaS (`@app/laas-catalog`,
+ * metadata pura) y, por ahora, los drivers de E/S (`@app/device-drivers`). Global para que
  * DevicesModule (health check / test-connection) y MeasurementsModule (ejecución de
- * mediciones) resuelvan el mismo registry sin depender el uno del otro.
+ * mediciones) resuelvan los mismos LaasCatalog y DeviceDriverRegistry sin depender el uno del otro.
  */
 @Global()
 @Module({
-  imports: [PrismaModule, PermissionsModule, CommonModule],
+  imports: [PrismaModule, PermissionsModule, CommonModule, LaasCatalogModule, DeviceDriversModule],
   controllers: [DevicePluginsController, ExperimentsController, ProjectExperimentsController],
   providers: [
-    ...DEVICE_PLUGINS,
-    {
-      provide: DEVICE_PLUGIN_INSTANCES,
-      useFactory: (...plugins: DevicePlugin[]) => plugins,
-      inject: DEVICE_PLUGINS,
-    },
-    DevicePluginRegistry,
     ExperimentConfigService,
     ExperimentCatalogService,
     DeviceActivityService,
     DeviceConfigurationService,
   ],
   exports: [
-    DevicePluginRegistry,
+    LaasCatalogModule,
+    DeviceDriversModule,
     ExperimentConfigService,
     ExperimentCatalogService,
     DeviceActivityService,

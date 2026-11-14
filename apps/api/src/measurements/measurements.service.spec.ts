@@ -1,7 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 import { MeasurementsService } from './measurements.service';
 
-function setup(resolved?: any) {
+function setup(resolved?: any, plugins: { sensor?: unknown; selector?: unknown } = {}) {
   const prisma = {
     measurement: {
       create: jest.fn(async ({ data }) => data),
@@ -26,11 +26,12 @@ function setup(resolved?: any) {
   const experimentConfig = { assertChannels: jest.fn(async () => resolved), assertRanges: jest.fn() };
   const release = jest.fn();
   const deviceActivity = { beginMeasurement: jest.fn(async () => release) };
+  const drivers = { sensor: jest.fn(() => plugins.sensor), actuator: jest.fn(() => plugins.selector) };
   const service = new MeasurementsService(
     prisma as any, teamScope as any, gateway as any, notifications as any, experimentConfig as any,
-    deviceActivity as any,
+    deviceActivity as any, drivers as any,
   );
-  return { service, prisma, gateway, notifications, deviceActivity, release };
+  return { service, prisma, gateway, notifications, deviceActivity, release, drivers };
 }
 
 const base = {
@@ -101,15 +102,15 @@ describe('MeasurementsService.measureTask (sensor + selector de canal)', () => {
       }),
     };
     return {
-      sensorPlugin, selectorPlugin,
+      sensorPlugin, selectorPlugin, plugins: { sensor: sensorPlugin, selector: selectorPlugin },
       resolved: {
         preference: {
           name: 'cfg', sensorDevice: { name: 'Sim', type: 'sim-impedance', ip: null },
           channelSelectorDevice: withSelector ? { name: 'Mux', type: 'kronos-mux-16', ip: '10.0.0.2' } : null,
         },
-        sensor: { plugin: sensorPlugin, description: {}, context: sensorCtx },
+        sensor: { description: {}, context: sensorCtx },
         selector: withSelector
-          ? { plugin: selectorPlugin, description: {}, context: selectorCtx, actuatorId: 'kronos-mux-16-channel', valueName: 'channel' }
+          ? { description: {}, context: selectorCtx, actuatorId: 'kronos-mux-16-channel', valueName: 'channel' }
           : null,
         channelRange: withSelector ? { min: 1, max: 16 } : { min: 1, max: 1 },
         valueMetas: [{ name: 'z', unit: 'Ω' }],
@@ -123,19 +124,21 @@ describe('MeasurementsService.measureTask (sensor + selector de canal)', () => {
 
   it('con selector: activa cada canal y luego mide todos los rangos con el plugin del sensor', async () => {
     const calls: string[] = [];
-    const { resolved, selectorPlugin, sensorPlugin } = resolvedWith(calls, true);
-    const { service, prisma } = setup(resolved);
+    const { resolved, plugins, selectorPlugin, sensorPlugin } = resolvedWith(calls, true);
+    const { service, prisma, drivers } = setup(resolved, plugins);
     const out = await service.measureTask(1, 'u1', { ranges, selectedChannels: [2, 1] });
     expect(out.channels).toEqual([1, 2]);
     expect(calls).toEqual(['set:1', 'get:1', 'get:3', 'set:2', 'get:1', 'get:3']);
     expect(selectorPlugin.setActuatorData).toHaveBeenCalledWith(selectorCtx, 'kronos-mux-16-channel', { channel: 1 });
     expect(sensorPlugin.getSensorData).toHaveBeenCalledWith(sensorCtx, { kind: 'sweep', start: 1, stop: 2, points: 2, scale: 'LOG' });
+    expect(drivers.sensor).toHaveBeenCalledWith('sim-impedance');
+    expect(drivers.actuator).toHaveBeenCalledWith('kronos-mux-16');
     expect(prisma.measurement.create.mock.calls[0][0].data).toMatchObject({ channelSelectorName: 'Mux', channelSelectorIp: '10.0.0.2', sensorDeviceName: 'Sim' });
   });
 
   it('guarda la copia genérica del barrido, el snapshot de adquisición y puntos { x, values }', async () => {
-    const { resolved } = resolvedWith([], false);
-    const { service, prisma, gateway } = setup(resolved);
+    const { resolved, plugins } = resolvedWith([], false);
+    const { service, prisma, gateway } = setup(resolved, plugins);
     const out = await service.measureTask(1, 'u1', { ranges, selectedChannels: [1] });
     const snapshot = { kind: 'sweep', variable: { name: 'frequency', unit: 'Hz', label: 'Frecuencia' } };
     const data = prisma.measurement.create.mock.calls[0][0].data;
@@ -149,8 +152,8 @@ describe('MeasurementsService.measureTask (sensor + selector de canal)', () => {
 
   it('sin selector: solo getSensorData, una vez por rango', async () => {
     const calls: string[] = [];
-    const { resolved, sensorPlugin } = resolvedWith(calls, false);
-    const { service, prisma } = setup(resolved);
+    const { resolved, plugins, sensorPlugin } = resolvedWith(calls, false);
+    const { service, prisma } = setup(resolved, plugins);
     await service.measureTask(1, 'u1', { ranges, selectedChannels: [1] });
     expect(calls).toEqual(['get:1', 'get:3']);
     expect(sensorPlugin.getSensorData).toHaveBeenCalledTimes(2);
@@ -158,16 +161,16 @@ describe('MeasurementsService.measureTask (sensor + selector de canal)', () => {
   });
 
   it('marca sensor y selector como ocupados durante la medición y los libera al terminar', async () => {
-    const { resolved } = resolvedWith([], true);
-    const { service, deviceActivity, release } = setup(resolved);
+    const { resolved, plugins } = resolvedWith([], true);
+    const { service, deviceActivity, release } = setup(resolved, plugins);
     await service.measureTask(1, 'u1', { ranges, selectedChannels: [1] });
     expect(deviceActivity.beginMeasurement).toHaveBeenCalledWith(['s1', 'm1']);
     expect(release).toHaveBeenCalledTimes(1);
   });
 
   it('rango fuera de los límites del sensor: falla antes de tocar el plugin, con el mismo mensaje', async () => {
-    const { resolved, sensorPlugin } = resolvedWith([], false);
-    const { service, prisma } = setup(resolved);
+    const { resolved, plugins, sensorPlugin } = resolvedWith([], false);
+    const { service, prisma } = setup(resolved, plugins);
     const badRanges = [{ start: 100, stop: 200, points: 2, scale: 'LOG' }]; // fuera de rangeMaximum: 10
     const message = 'Sim mide Frecuencia entre 1 Hz y 10 Hz';
     (service as any).experimentConfig.assertRanges = jest.fn(() => {
@@ -190,13 +193,13 @@ describe('MeasurementsService.measureTask (sensor + selector de canal)', () => {
         name: 'cfg', sensorDevice: { name: 'Temp', type: 'sim-temperature', ip: null },
         channelSelectorDevice: null,
       },
-      sensor: { plugin: sensorPlugin, description: {}, context: sensorCtx2 },
+      sensor: { description: {}, context: sensorCtx2 },
       selector: null,
       channelRange: { min: 1, max: 1 },
       valueMetas: [{ name: 'temperature', unit: '°C' }, { name: 'humidity', unit: '%HR' }],
       acquisition: { kind: 'single', secondsPerReading: 1 },
     };
-    const { service, prisma } = setup(resolved);
+    const { service, prisma } = setup(resolved, { sensor: sensorPlugin });
     const out = await service.measureTask(1, 'u1', { ranges: [], selectedChannels: [1] });
     expect(sensorPlugin.getSensorData).toHaveBeenCalledTimes(1);
     expect(sensorPlugin.getSensorData).toHaveBeenCalledWith(sensorCtx2, { kind: 'single' });
@@ -209,9 +212,9 @@ describe('MeasurementsService.measureTask (sensor + selector de canal)', () => {
   });
 
   it('libera los dispositivos aunque getSensorData o el guardado fallen', async () => {
-    const { resolved, sensorPlugin } = resolvedWith([], false);
+    const { resolved, plugins, sensorPlugin } = resolvedWith([], false);
     sensorPlugin.getSensorData.mockRejectedValue(new Error('timeout'));
-    const { service, prisma, deviceActivity, release } = setup(resolved);
+    const { service, prisma, deviceActivity, release } = setup(resolved, plugins);
     prisma.measurement.create.mockRejectedValue(new Error('db'));
     await expect(service.measureTask(1, 'u1', { ranges, selectedChannels: [1] })).rejects.toThrow('db');
     expect(deviceActivity.beginMeasurement).toHaveBeenCalledWith(['s1']);

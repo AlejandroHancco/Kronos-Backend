@@ -1,6 +1,6 @@
 import { toCsvCell, toCsvRow } from './csv.util';
 import { parseAcquisitionSnapshot, parseSensorValues, storedPointsOf, type MeasurementValueMeta } from '../measurements/measurement-data';
-import type { AcquisitionSnapshot } from '../device-plugins/core/acquisition';
+import type { AcquisitionSnapshot } from '@app/laas-catalog';
 
 const HEADER_BEFORE = ['measurement_id', 'taken_at', 'taken_by', 'preset', 'watcher_status'];
 const HEADER_CHANNEL = ['channel', 'channel_alias'];

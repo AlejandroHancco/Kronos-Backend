@@ -55,6 +55,24 @@
         "tsConfigPath": "libs/realtime/tsconfig.lib.json"
       }
     },
+    "laas-catalog": {
+      "type": "library",
+      "root": "libs/laas-catalog",
+      "entryFile": "index",
+      "sourceRoot": "libs/laas-catalog/src",
+      "compilerOptions": {
+        "tsConfigPath": "libs/laas-catalog/tsconfig.lib.json"
+      }
+    },
+    "device-drivers": {
+      "type": "library",
+      "root": "libs/device-drivers",
+      "entryFile": "index",
+      "sourceRoot": "libs/device-drivers/src",
+      "compilerOptions": {
+        "tsConfigPath": "libs/device-drivers/tsconfig.lib.json"
+      }
+    },
     "common": {
       "type": "library",
       "root": "libs/common",

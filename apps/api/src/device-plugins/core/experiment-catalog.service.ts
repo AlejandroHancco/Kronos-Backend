@@ -1,8 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@app/database';
 import { TeamScopeService } from '@app/common';
-import { DevicePluginRegistry } from './device-plugin.registry';
-import { ExperimentDefinition, experimentCatalog } from './experiments';
+import { ExperimentDefinition, LaasCatalog, experimentCatalog } from '@app/laas-catalog';
 
 export interface ExperimentDeviceOption { id: string; name: string; ip: string | null; status: string }
 
@@ -18,12 +17,12 @@ export interface ProjectExperiment extends ExperimentDefinition {
 export class ExperimentCatalogService {
   constructor(
     private prisma: PrismaService,
-    private registry: DevicePluginRegistry,
+    private laas: LaasCatalog,
     private teamScope: TeamScopeService,
   ) {}
 
   catalog(): ExperimentDefinition[] {
-    return experimentCatalog(this.registry.catalog());
+    return experimentCatalog(this.laas.catalog());
   }
 
   async forProject(projectId: string, userId: string): Promise<ProjectExperiment[]> {
@@ -35,7 +34,7 @@ export class ExperimentCatalogService {
     });
     const ofType = (type: string | null): ExperimentDeviceOption[] =>
       type ? devices.filter((d) => d.type === type).map(({ id, name, ip, status }) => ({ id, name, ip, status })) : [];
-    const shortName = (type: string) => this.registry.describe(type).shortName;
+    const shortName = (type: string) => this.laas.describe(type).shortName;
 
     return this.catalog().map((e) => {
       const sensorDevices = ofType(e.sensorType);

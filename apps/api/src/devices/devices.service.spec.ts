@@ -1,13 +1,15 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { DevicesService } from './devices.service';
-import { DevicePluginRegistry } from '../device-plugins/core/device-plugin.registry';
-import { HiokiIm3570Plugin } from '../device-plugins/plugins/hioki-im3570/hioki-im3570.plugin';
-import { KronosMux16Plugin } from '../device-plugins/plugins/kronos-mux-16/kronos-mux-16.plugin';
-import { SimulatedImpedancePlugin } from '../device-plugins/plugins/sim-impedance/sim-impedance.plugin';
+import { HIOKI_IM3570, KRONOS_MUX_16, LaasCatalog, SIM_IMPEDANCE } from '@app/laas-catalog';
+import { DeviceDriverRegistry, HiokiIm3570Driver, KronosMux16Driver, SimulatedImpedanceDriver } from '@app/device-drivers';
+
+const newCatalog = () => new LaasCatalog([HIOKI_IM3570, KRONOS_MUX_16, SIM_IMPEDANCE]);
+const newDrivers = () => new DeviceDriverRegistry([new HiokiIm3570Driver(), new KronosMux16Driver(), new SimulatedImpedanceDriver()]);
 
 function setup() {
-  const registry = new DevicePluginRegistry([new HiokiIm3570Plugin(), new KronosMux16Plugin(), new SimulatedImpedancePlugin()]);
+  const catalog = newCatalog();
+  const drivers = newDrivers();
   const prisma = {
     device: {
       create: jest.fn(async ({ data }) => data),
@@ -21,7 +23,7 @@ function setup() {
   const teamScope = { assertProjectInTeam: jest.fn(), projectWhereForUser: jest.fn(async () => ({})) };
   const deviceConfiguration = { view: jest.fn(async (d) => ({ deviceId: d.id })), apply: jest.fn(async (d) => ({ deviceId: d.id })) };
   return {
-    service: new DevicesService(prisma as any, teamScope as any, registry, deviceConfiguration as any),
+    service: new DevicesService(prisma as any, teamScope as any, catalog, drivers, deviceConfiguration as any),
     prisma, deviceConfiguration,
   };
 }
@@ -48,11 +50,11 @@ describe('DevicesService (tipos por plugin)', () => {
     await expect(setup().service.testConnection({ type: 'hioki-im3570' })).rejects.toBeInstanceOf(BadRequestException);
   });
 
-  it('checkReachable delega en testConnection del plugin con { ip, port } (puerto por defecto del catálogo)', async () => {
-    const registry = new DevicePluginRegistry([new HiokiIm3570Plugin(), new KronosMux16Plugin(), new SimulatedImpedancePlugin()]);
-    const service = new DevicesService({} as any, {} as any, registry, {} as any);
-    const hioki = jest.spyOn(registry.get('hioki-im3570'), 'testConnection').mockResolvedValue(true);
-    const mux = jest.spyOn(registry.get('kronos-mux-16'), 'testConnection').mockResolvedValue(true);
+  it('checkReachable delega en testConnection del driver con { ip, port } (puerto por defecto del catálogo)', async () => {
+    const drivers = newDrivers();
+    const service = new DevicesService({} as any, {} as any, newCatalog(), drivers, {} as any);
+    const hioki = jest.spyOn(drivers.get('hioki-im3570'), 'testConnection').mockResolvedValue(true);
+    const mux = jest.spyOn(drivers.get('kronos-mux-16'), 'testConnection').mockResolvedValue(true);
     await expect(service.checkReachable('hioki-im3570', '10.0.0.5')).resolves.toBe(true);
     expect(hioki).toHaveBeenCalledWith({ ip: '10.0.0.5', port: 3570 });
     await expect(service.checkReachable('kronos-mux-16', '10.0.0.6', 8080)).resolves.toBe(true);

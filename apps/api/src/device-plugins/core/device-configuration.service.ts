@@ -1,16 +1,20 @@
 import { BadGatewayException, BadRequestException, Injectable } from '@nestjs/common';
 import { Device, Prisma } from '@prisma/client';
 import { PrismaService } from '@app/database';
-import { DevicePluginRegistry } from './device-plugin.registry';
+// Intermedio: la E/S de configuración live pasa al worker (device-ops) en tareas posteriores.
+import { DeviceDriverRegistry } from '@app/device-drivers';
 import { DeviceActivityService } from './device-activity.service';
-import type { ConfigurationParameterMetadata, ConfigurationValue, ConfigurationValues } from './device-plugin.interface';
 import {
+  ConfigurationParameterMetadata,
+  ConfigurationValue,
+  ConfigurationValues,
+  LaasCatalog,
   configurationPatchErrors,
   effectiveConfiguration,
   parameterValueError,
   splitPatch,
   toDeviceContext,
-} from './configuration';
+} from '@app/laas-catalog';
 
 export type ConfigurationParameterView = ConfigurationParameterMetadata & { value: ConfigurationValue | null };
 
@@ -24,26 +28,27 @@ export interface DeviceConfigurationView {
 
 /**
  * getConfiguration / setConfiguration por dispositivo. Los parámetros 'persisted' se guardan en
- * `devices.configuration`; los 'live' los aplica el plugin en el dispositivo y nunca se guardan;
+ * `devices.configuration`; los 'live' los aplica el driver en el dispositivo y nunca se guardan;
  * los 'fixed' solo existen en la service description.
  */
 @Injectable()
 export class DeviceConfigurationService {
   constructor(
     private prisma: PrismaService,
-    private registry: DevicePluginRegistry,
+    private catalog: LaasCatalog,
+    private drivers: DeviceDriverRegistry,
     private deviceActivity: DeviceActivityService,
   ) {}
 
   async view(device: Device): Promise<DeviceConfigurationView> {
-    const plugin = this.registry.get(device.type);
-    const description = plugin.describe();
+    const description = this.catalog.describe(device.type);
     const params = description.configuration;
     const effective = effectiveConfiguration(params, device.configuration);
     let live: Record<string, ConfigurationValue | null> = {};
-    if (params.some((p) => p.storage === 'live') && plugin.readLiveConfiguration) {
+    if (params.some((p) => p.storage === 'live')) {
       try {
-        live = await plugin.readLiveConfiguration(toDeviceContext(device, description));
+        const driver = this.drivers.get(device.type);
+        if (driver.readLiveConfiguration) live = await driver.readLiveConfiguration(toDeviceContext(device, description));
       } catch {
         live = {};
       }
@@ -57,8 +62,7 @@ export class DeviceConfigurationService {
   }
 
   async apply(device: Device, values: Record<string, unknown>): Promise<DeviceConfigurationView> {
-    const plugin = this.registry.get(device.type);
-    const description = plugin.describe();
+    const description = this.catalog.describe(device.type);
     const params = description.configuration;
     if (device.status === 'archived') throw new BadRequestException('No se puede configurar un dispositivo archivado');
 
@@ -66,7 +70,7 @@ export class DeviceConfigurationService {
     if (errors.length) throw new BadRequestException(errors.join('; '));
     const { persisted, live } = splitPatch(params, values as ConfigurationValues);
 
-    const crossFieldError = plugin.validateConfiguration?.({ ...effectiveConfiguration(params, device.configuration), ...persisted });
+    const crossFieldError = this.catalog.validateConfiguration(device.type, { ...effectiveConfiguration(params, device.configuration), ...persisted });
     if (crossFieldError) throw new BadRequestException(crossFieldError);
 
     const hasLive = Object.keys(live).length > 0;
@@ -77,7 +81,7 @@ export class DeviceConfigurationService {
     const updated = await this.deviceActivity.runConfiguration(device, async () => {
       if (hasLive) {
         try {
-          await plugin.applyLiveConfiguration!(toDeviceContext(device, description), live);
+          await this.drivers.get(device.type).applyLiveConfiguration!(toDeviceContext(device, description), live);
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
           throw new BadGatewayException(`No se pudo aplicar la configuración en "${device.name}": ${msg}`);

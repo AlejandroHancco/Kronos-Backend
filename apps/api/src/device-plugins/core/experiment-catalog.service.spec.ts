@@ -1,10 +1,7 @@
-import { DevicePluginRegistry } from './device-plugin.registry';
-import { HiokiIm3570Plugin } from '../plugins/hioki-im3570/hioki-im3570.plugin';
-import { KronosMux16Plugin } from '../plugins/kronos-mux-16/kronos-mux-16.plugin';
-import { SimulatedImpedancePlugin } from '../plugins/sim-impedance/sim-impedance.plugin';
+import { HIOKI_IM3570, KRONOS_MUX_16, LaasCatalog, SIM_IMPEDANCE } from '@app/laas-catalog';
 import { ExperimentCatalogService } from './experiment-catalog.service';
 
-const registry = new DevicePluginRegistry([new HiokiIm3570Plugin(), new KronosMux16Plugin(), new SimulatedImpedancePlugin()]);
+const catalog = new LaasCatalog([HIOKI_IM3570, KRONOS_MUX_16, SIM_IMPEDANCE]);
 const devices = [
   { id: 'h', name: 'Hioki lab', type: 'hioki-im3570', ip: '10.0.0.2', status: 'online' },
   { id: 'm', name: 'MUX', type: 'kronos-mux-16', ip: '10.0.0.3', status: 'offline' },
@@ -13,7 +10,7 @@ const devices = [
 describe('ExperimentCatalogService', () => {
   const findMany = jest.fn(async () => devices);
   const teamScope = { assertProjectInTeam: jest.fn(async () => undefined) };
-  const service = new ExperimentCatalogService({ device: { findMany } } as any, registry, teamScope as any);
+  const service = new ExperimentCatalogService({ device: { findMany } } as any, catalog, teamScope as any);
 
   it('catalog: los cuatro experimentos derivados', () => {
     expect(service.catalog()).toHaveLength(4);

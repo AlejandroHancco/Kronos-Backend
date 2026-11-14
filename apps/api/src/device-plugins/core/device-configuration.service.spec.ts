@@ -1,11 +1,9 @@
 import { BadGatewayException, BadRequestException, ConflictException } from '@nestjs/common';
 import axios from 'axios';
-import { DevicePluginRegistry } from './device-plugin.registry';
+import { HIOKI_IM3570, KRONOS_MUX_16, LaasCatalog, SIM_IMPEDANCE } from '@app/laas-catalog';
+import { DeviceDriverRegistry, HiokiIm3570Driver, KronosMux16Driver, SimulatedImpedanceDriver } from '@app/device-drivers';
 import { DeviceActivityService } from './device-activity.service';
 import { DeviceConfigurationService } from './device-configuration.service';
-import { HiokiIm3570Plugin } from '../plugins/hioki-im3570/hioki-im3570.plugin';
-import { KronosMux16Plugin } from '../plugins/kronos-mux-16/kronos-mux-16.plugin';
-import { SimulatedImpedancePlugin } from '../plugins/sim-impedance/sim-impedance.plugin';
 
 jest.mock('axios');
 const mockedGet = axios.get as jest.Mock;
@@ -14,15 +12,16 @@ const device = (type: string, over: Record<string, unknown> = {}) =>
   ({ id: `${type}-1`, name: type === 'kronos-mux-16' ? 'MUX' : 'Eq', type, ip: '10.0.0.4', status: 'online', projectId: 'P', configuration: null, ...over }) as any;
 
 function setup() {
-  const mux = new KronosMux16Plugin();
+  const mux = new KronosMux16Driver();
   mux.retryDelayMs = 0;
-  const registry = new DevicePluginRegistry([new HiokiIm3570Plugin(), mux, new SimulatedImpedancePlugin()]);
+  const catalog = new LaasCatalog([HIOKI_IM3570, KRONOS_MUX_16, SIM_IMPEDANCE]);
+  const drivers = new DeviceDriverRegistry([new HiokiIm3570Driver(), mux, new SimulatedImpedanceDriver()]);
   const update = jest.fn(async ({ where, data }) => ({ ...device('sim-impedance'), id: where.id, ...data }));
   const activity = new DeviceActivityService({
     scheduledJob: { findMany: jest.fn(async () => []) },
     taskPreference: { findMany: jest.fn(async () => []) },
   } as any);
-  const service = new DeviceConfigurationService({ device: { update } } as any, registry, activity);
+  const service = new DeviceConfigurationService({ device: { update } } as any, catalog, drivers, activity);
   return { service, update, activity };
 }
 
@@ -65,13 +64,14 @@ describe('DeviceConfigurationService', () => {
     expect(update).not.toHaveBeenCalled();
   });
 
-  it('MUX: el canal se aplica en vivo y no se guarda', async () => {
+  it('MUX: el canal se aplica en vivo y no se guarda (el driver no lo recuerda)', async () => {
     mockedGet.mockResolvedValue({ status: 200 });
     const { service, update } = setup();
     const view = await service.apply(device('kronos-mux-16'), { channel: 3 });
     expect(mockedGet).toHaveBeenCalledWith('http://10.0.0.4/?orden=3', expect.anything());
     expect(update).not.toHaveBeenCalled();
-    expect(valueOf(view, 'channel')).toBe(3);
+    // Driver sin estado: hasta que el core registre los valores live, el canal activo es desconocido.
+    expect(valueOf(view, 'channel')).toBeNull();
   });
 
   it('MUX sin canal conocido: null', async () => {

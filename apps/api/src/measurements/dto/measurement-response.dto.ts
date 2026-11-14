@@ -1,4 +1,4 @@
-import type { AcquisitionSnapshot } from '../../device-plugins/core/acquisition';
+import type { AcquisitionSnapshot } from '@app/laas-catalog';
 
 export class MeasurementResponseDto {
   id: number;
