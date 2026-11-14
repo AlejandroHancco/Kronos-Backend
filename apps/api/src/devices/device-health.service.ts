@@ -3,6 +3,9 @@ import { Interval } from '@nestjs/schedule';
 import { PrismaService } from '@app/database';
 import { DevicesService } from './devices.service';
 import { RealtimePublisher } from '@app/realtime';
+import { LaasCatalog } from '@app/laas-catalog';
+// Intermedio: el health check pasa al worker en la tarea 8; hasta entonces sigue usando los drivers.
+import { DeviceDriverRegistry } from '@app/device-drivers';
 
 const CHECK_INTERVAL_MS = 30_000;
 const CONCURRENCY = 5;
@@ -21,6 +24,8 @@ export class DeviceHealthService {
     private prisma: PrismaService,
     private devicesService: DevicesService,
     private realtime: RealtimePublisher,
+    private catalog: LaasCatalog,
+    private drivers: DeviceDriverRegistry,
   ) {}
 
   @Interval(CHECK_INTERVAL_MS)
@@ -55,7 +60,7 @@ export class DeviceHealthService {
     status: string;
     projectId: string;
   }) {
-    const reachable = await this.devicesService.checkReachable(device.type ?? '', device.ip);
+    const reachable = await this.checkReachable(device.type ?? '', device.ip);
     const newStatus = reachable ? 'online' : 'offline';
 
     if (newStatus === device.status) return;
@@ -74,5 +79,13 @@ export class DeviceHealthService {
         err instanceof Error ? err.stack : err,
       );
     }
+  }
+
+  /** Chequeo crudo de alcanzabilidad vía el driver registrado para `type` (se mueve al worker en la tarea 8). */
+  async checkReachable(type: string, ip: string | null, port?: number): Promise<boolean> {
+    if (!this.catalog.has(type) || !this.drivers.has(type)) return false;
+    const entry = this.catalog.catalog().find((e) => e.deviceType === type)!;
+    if (entry.connection.requiresIp && !ip) return false;
+    return this.drivers.get(type).testConnection({ ip, port: port ?? entry.connection.defaultPort });
   }
 }

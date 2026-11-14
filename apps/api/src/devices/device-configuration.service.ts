@@ -1,9 +1,8 @@
-import { BadGatewayException, BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
 import { Device, Prisma } from '@prisma/client';
 import { PrismaService } from '@app/database';
-// Intermedio: la E/S de configuración live pasa al worker (device-ops) en tareas posteriores.
-import { DeviceDriverRegistry } from '@app/device-drivers';
 import { DeviceStateService } from '@app/redis';
+import { DeviceOpsClient } from '@app/queue';
 import {
   ConfigurationParameterMetadata,
   ConfigurationValue,
@@ -13,8 +12,10 @@ import {
   effectiveConfiguration,
   parameterValueError,
   splitPatch,
-  toDeviceContext,
 } from '@app/laas-catalog';
+import { deviceOpTimeoutMs, mapDeviceOpError } from './device-op-errors';
+
+const busyMessage = (name: string) => `"${name}" está midiendo; espera a que termine para cambiar su configuración`;
 
 export type ConfigurationParameterView = ConfigurationParameterMetadata & { value: ConfigurationValue | null };
 
@@ -28,7 +29,7 @@ export interface DeviceConfigurationView {
 
 /**
  * getConfiguration / setConfiguration por dispositivo. Los parámetros 'persisted' se guardan en
- * `devices.configuration`; los 'live' los aplica el driver en el dispositivo y nunca se guardan;
+ * `devices.configuration`; los 'live' los aplica el worker (cola device-ops) en el dispositivo y nunca se guardan;
  * los 'fixed' solo existen en la service description.
  */
 @Injectable()
@@ -36,8 +37,8 @@ export class DeviceConfigurationService {
   constructor(
     private prisma: PrismaService,
     private catalog: LaasCatalog,
-    private drivers: DeviceDriverRegistry,
     private deviceState: DeviceStateService,
+    private deviceOps: DeviceOpsClient,
   ) {}
 
   async view(device: Device): Promise<DeviceConfigurationView> {
@@ -47,8 +48,11 @@ export class DeviceConfigurationService {
     let live: Record<string, ConfigurationValue | null> = {};
     if (params.some((p) => p.storage === 'live')) {
       try {
-        const driver = this.drivers.get(device.type);
-        if (driver.readLiveConfiguration) live = await driver.readLiveConfiguration(toDeviceContext(device, description));
+        live = (await this.deviceOps.request<Record<string, ConfigurationValue | null> | null>(
+          'read-live-configuration',
+          { deviceId: device.id },
+          deviceOpTimeoutMs(),
+        )) ?? {};
       } catch {
         live = {};
       }
@@ -78,21 +82,26 @@ export class DeviceConfigurationService {
       throw new BadRequestException(`"${device.name}" no tiene IP configurada`);
     }
 
-    const updated = await this.deviceState.withExclusive(device, async () => {
-      if (hasLive) {
-        try {
-          await this.drivers.get(device.type).applyLiveConfiguration!(toDeviceContext(device, description), live);
-        } catch (e) {
-          const msg = e instanceof Error ? e.message : String(e);
-          throw new BadGatewayException(`No se pudo aplicar la configuración en "${device.name}": ${msg}`);
-        }
+    if (hasLive) {
+      // Camino rápido: el 409 definitivo lo da el worker (withExclusive) al ejecutar la operación.
+      if (await this.deviceState.isBusy(device.id)) throw new ConflictException(busyMessage(device.name));
+      try {
+        await this.deviceOps.request('apply-live-configuration', { deviceId: device.id, values: live }, deviceOpTimeoutMs());
+      } catch (e) {
+        throw mapDeviceOpError(e, device.name);
       }
-      if (Object.keys(persisted).length === 0) return device;
-      return this.prisma.device.update({
-        where: { id: device.id },
-        data: { configuration: { ...this.validStored(params, device.configuration), ...persisted } as Prisma.InputJsonValue },
-      });
-    });
+    }
+    // La parte persistida solo se guarda si la live tuvo éxito; con el lock para que una medición
+    // que arranca a la vez lo vea.
+    const updated =
+      Object.keys(persisted).length === 0
+        ? device
+        : await this.deviceState.withExclusive(device, () =>
+            this.prisma.device.update({
+              where: { id: device.id },
+              data: { configuration: { ...this.validStored(params, device.configuration), ...persisted } as Prisma.InputJsonValue },
+            }),
+          );
     return this.view(updated);
   }
 

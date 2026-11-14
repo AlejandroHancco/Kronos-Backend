@@ -7,9 +7,9 @@ import { UpdateDeviceDto } from './dto/update-device.dto';
 import { UpdateDeviceStatusDto } from './dto/update-device-status.dto';
 import { TestConnectionDto } from './dto/test-connection.dto';
 import { DeviceTypeCatalogEntry, LaasCatalog } from '@app/laas-catalog';
-// Intermedio: test-connection / health check pasan al worker en tareas posteriores.
-import { DeviceDriverRegistry } from '@app/device-drivers';
-import { DeviceConfigurationService } from '../device-plugins/core/device-configuration.service';
+import { DeviceOpsClient } from '@app/queue';
+import { DeviceConfigurationService } from './device-configuration.service';
+import { deviceTestTimeoutMs } from './device-op-errors';
 
 @Injectable()
 export class DevicesService {
@@ -17,8 +17,8 @@ export class DevicesService {
       private prisma: PrismaService,
       private teamScope: TeamScopeService,
       private catalog: LaasCatalog,
-      private drivers: DeviceDriverRegistry,
       private deviceConfiguration: DeviceConfigurationService,
+      private deviceOps: DeviceOpsClient,
   ) {}
 
   // ── Global: todos los dispositivos de proyectos del equipo del usuario ──────
@@ -167,7 +167,7 @@ export class DevicesService {
     if (entry.connection.requiresIp && !dto.ip) throw new BadRequestException('Este tipo de dispositivo requiere una IP');
     const port = dto.port ?? entry.connection.defaultPort;
     const where = dto.ip ? `${dto.ip}${port && entry.connection.defaultPort ? `:${port}` : ''}` : '';
-    const reachable = await this.checkReachable(dto.type, dto.ip ?? null, port);
+    const reachable = await this.workerReachable(dto.type, dto.ip ?? '', port ?? 0);
     if (!entry.connection.requiresIp) {
       return { success: reachable, message: `${entry.label} ${reachable ? 'disponible' : 'no disponible'}${entry.simulated ? ' (simulado)' : ''}` };
     }
@@ -177,15 +177,15 @@ export class DevicesService {
   }
 
   /**
-   * Chequeo crudo de alcanzabilidad (sin mensajes), usado también por el health check
-   * periódico. Delega en el driver registrado para `type` — un dispositivo nuevo
-   * (type distinto) queda cubierto automáticamente con solo registrar su modelo y su driver.
+   * La API no abre sockets hacia el laboratorio: delega el chequeo en el worker (cola 'device-ops').
+   * Cualquier fallo (worker sin respuesta, error) cuenta como "no alcanzable".
    */
-  async checkReachable(type: string, ip: string | null, port?: number): Promise<boolean> {
-    if (!this.catalog.has(type) || !this.drivers.has(type)) return false;
-    const entry = this.catalog.catalog().find((e) => e.deviceType === type)!;
-    if (entry.connection.requiresIp && !ip) return false;
-    return this.drivers.get(type).testConnection({ ip, port: port ?? entry.connection.defaultPort });
+  private async workerReachable(type: string, ip: string, port: number): Promise<boolean> {
+    try {
+      return (await this.deviceOps.request<boolean>('test-connection', { type, ip, port }, deviceTestTimeoutMs())) === true;
+    } catch {
+      return false;
+    }
   }
 
   /** Dispositivo de un proyecto del equipo del usuario, o 404. */

@@ -1,6 +1,16 @@
 import { DeviceHealthService } from './device-health.service';
 
+let checkReachable: jest.Mock;
+let reachable = true;
+function mk(prisma: any, devicesService: any, gateway: any) {
+  const service = new DeviceHealthService(prisma, devicesService, gateway, {} as any, {} as any);
+  checkReachable = jest.spyOn(service, 'checkReachable').mockResolvedValue(reachable) as unknown as jest.Mock;
+  return service;
+}
+
 describe('DeviceHealthService.checkAllDevices', () => {
+  beforeEach(() => { reachable = true; });
+
   it('un fallo al emitir el cambio de estado no salta el resto de dispositivos', async () => {
     const devices = Array.from({ length: 7 }, (_, i) => ({
       id: `d${i + 1}`, ip: `10.0.0.${i + 1}`, type: 'hioki-im3570', status: 'offline', projectId: 'p1',
@@ -9,7 +19,6 @@ describe('DeviceHealthService.checkAllDevices', () => {
       device: { findMany: jest.fn().mockResolvedValue(devices), update: jest.fn().mockResolvedValue({}) },
     };
     const devicesService = {
-      checkReachable: jest.fn().mockResolvedValue(true),
       addresslessTypes: jest.fn().mockReturnValue(['sim-impedance']),
     };
     const gateway = {
@@ -17,7 +26,7 @@ describe('DeviceHealthService.checkAllDevices', () => {
         if (id === 'd1') throw new Error('db down');
       }),
     };
-    const service = new DeviceHealthService(prisma as any, devicesService as any, gateway as any);
+    const service = mk(prisma, devicesService, gateway);
     const errorSpy = jest.spyOn((service as any).logger, 'error').mockImplementation(() => {});
 
     await service.checkAllDevices();
@@ -34,14 +43,14 @@ describe('DeviceHealthService.checkAllDevices', () => {
         update: jest.fn().mockResolvedValue({}),
       },
     };
-    const devicesService = { checkReachable: jest.fn().mockResolvedValue(true), addresslessTypes: jest.fn().mockReturnValue(['sim-impedance']) };
+    const devicesService = { addresslessTypes: jest.fn().mockReturnValue(['sim-impedance']) };
     const gateway = { deviceStatus: jest.fn() };
-    await new DeviceHealthService(prisma as any, devicesService as any, gateway as any).checkAllDevices();
+    await mk(prisma, devicesService, gateway).checkAllDevices();
     expect(prisma.device.findMany.mock.calls[0][0].where).toEqual({
       status: { not: 'archived' },
       OR: [{ ip: { not: null } }, { type: { in: ['sim-impedance'] } }],
     });
-    expect(devicesService.checkReachable).toHaveBeenCalledWith('sim-impedance', null);
+    expect(checkReachable).toHaveBeenCalledWith('sim-impedance', null);
     expect(prisma.device.update).toHaveBeenCalledWith({ where: { id: 's1' }, data: { status: 'online' } });
   });
 
@@ -52,10 +61,11 @@ describe('DeviceHealthService.checkAllDevices', () => {
         update: jest.fn().mockResolvedValue({}),
       },
     };
-    const devicesService = { checkReachable: jest.fn().mockResolvedValue(false), addresslessTypes: jest.fn().mockReturnValue([]) };
+    reachable = false;
+    const devicesService = { addresslessTypes: jest.fn().mockReturnValue([]) };
     const gateway = { deviceStatus: jest.fn() };
-    await new DeviceHealthService(prisma as any, devicesService as any, gateway as any).checkAllDevices();
-    expect(devicesService.checkReachable).toHaveBeenCalledWith('', '10.0.0.9');
+    await mk(prisma, devicesService, gateway).checkAllDevices();
+    expect(checkReachable).toHaveBeenCalledWith('', '10.0.0.9');
     expect(prisma.device.update).toHaveBeenCalledWith({ where: { id: 'n1' }, data: { status: 'offline' } });
   });
 });

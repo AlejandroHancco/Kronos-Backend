@@ -2,14 +2,12 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { DevicesService } from './devices.service';
 import { HIOKI_IM3570, KRONOS_MUX_16, LaasCatalog, SIM_IMPEDANCE } from '@app/laas-catalog';
-import { DeviceDriverRegistry, HiokiIm3570Driver, KronosMux16Driver, SimulatedImpedanceDriver } from '@app/device-drivers';
+import { DeviceOpTimeoutError } from '@app/queue';
 
 const newCatalog = () => new LaasCatalog([HIOKI_IM3570, KRONOS_MUX_16, SIM_IMPEDANCE]);
-const newDrivers = () => new DeviceDriverRegistry([new HiokiIm3570Driver(), new KronosMux16Driver(), new SimulatedImpedanceDriver()]);
 
 function setup() {
   const catalog = newCatalog();
-  const drivers = newDrivers();
   const prisma = {
     device: {
       create: jest.fn(async ({ data }) => data),
@@ -22,9 +20,10 @@ function setup() {
   };
   const teamScope = { assertProjectInTeam: jest.fn(), projectWhereForUser: jest.fn(async () => ({})) };
   const deviceConfiguration = { view: jest.fn(async (d) => ({ deviceId: d.id })), apply: jest.fn(async (d) => ({ deviceId: d.id })) };
+  const deviceOps = { request: jest.fn(async (): Promise<any> => true) };
   return {
-    service: new DevicesService(prisma as any, teamScope as any, catalog, drivers, deviceConfiguration as any),
-    prisma, deviceConfiguration,
+    service: new DevicesService(prisma as any, teamScope as any, catalog, deviceConfiguration as any, deviceOps as any),
+    prisma, deviceConfiguration, deviceOps,
   };
 }
 
@@ -50,18 +49,30 @@ describe('DevicesService (tipos por plugin)', () => {
     await expect(setup().service.testConnection({ type: 'hioki-im3570' })).rejects.toBeInstanceOf(BadRequestException);
   });
 
-  it('checkReachable delega en testConnection del driver con { ip, port } (puerto por defecto del catálogo)', async () => {
-    const drivers = newDrivers();
-    const service = new DevicesService({} as any, {} as any, newCatalog(), drivers, {} as any);
-    const hioki = jest.spyOn(drivers.get('hioki-im3570'), 'testConnection').mockResolvedValue(true);
-    const mux = jest.spyOn(drivers.get('kronos-mux-16'), 'testConnection').mockResolvedValue(true);
-    await expect(service.checkReachable('hioki-im3570', '10.0.0.5')).resolves.toBe(true);
-    expect(hioki).toHaveBeenCalledWith({ ip: '10.0.0.5', port: 3570 });
-    await expect(service.checkReachable('kronos-mux-16', '10.0.0.6', 8080)).resolves.toBe(true);
-    expect(mux).toHaveBeenCalledWith({ ip: '10.0.0.6', port: 8080 });
-    await expect(service.checkReachable('kronos-mux-16', null)).resolves.toBe(false);
-    await expect(service.checkReachable('analyzer', '10.0.0.5')).resolves.toBe(false);
-    await expect(service.checkReachable('', '10.0.0.5')).resolves.toBe(false);
+  it('testConnection encola test-connection con DEVICE_TEST_TIMEOUT_MS y conserva los mensajes', async () => {
+    const { service, deviceOps } = setup();
+    await expect(service.testConnection({ type: 'hioki-im3570', ip: '10.0.0.5' })).resolves.toEqual({
+      success: true, message: 'Hioki IM3570 LCR Meter encontrado en 10.0.0.5:3570',
+    });
+    expect(deviceOps.request).toHaveBeenCalledWith('test-connection', { type: 'hioki-im3570', ip: '10.0.0.5', port: 3570 }, 5000);
+    deviceOps.request.mockResolvedValue(false);
+    await expect(service.testConnection({ type: 'hioki-im3570', ip: '10.0.0.5', port: 3571 })).resolves.toEqual({
+      success: false, message: 'No se pudo conectar a Hioki IM3570 LCR Meter en 10.0.0.5:3571',
+    });
+    expect(deviceOps.request).toHaveBeenLastCalledWith('test-connection', { type: 'hioki-im3570', ip: '10.0.0.5', port: 3571 }, 5000);
+  });
+
+  it('testConnection: timeout configurable y worker sin respuesta → no alcanzable', async () => {
+    const { service, deviceOps } = setup();
+    deviceOps.request.mockRejectedValue(new DeviceOpTimeoutError('timeout'));
+    process.env.DEVICE_TEST_TIMEOUT_MS = '1200';
+    try {
+      const res = await service.testConnection({ type: 'hioki-im3570', ip: '10.0.0.5' });
+      expect(res.success).toBe(false);
+      expect(deviceOps.request.mock.calls[0][2]).toBe(1200);
+    } finally {
+      delete process.env.DEVICE_TEST_TIMEOUT_MS;
+    }
   });
 
   it('addresslessTypes lista solo tipos sin IP', () => {
