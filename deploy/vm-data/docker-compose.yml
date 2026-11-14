@@ -1,0 +1,30 @@
+# vm-data: Postgres (major = POSTGRES_IMAGE_TAG, default 16) + Redis 7 (AOF + password),
+# bound to the private IP only. Set POSTGRES_IMAGE_TAG to the migration source's major.
+# Run from this directory:  docker compose --env-file .env up -d
+services:
+  postgres:
+    image: postgres:${POSTGRES_IMAGE_TAG:-16}
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB required}
+    ports:
+      - "${PRIVATE_IP:?PRIVATE_IP required}:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # First-init scripts (empty data dir only): creates schema "platform" + search_path.
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+
+  redis:
+    image: redis:7-alpine
+    restart: always
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?REDIS_PASSWORD required}"]
+    ports:
+      - "${PRIVATE_IP:?PRIVATE_IP required}:6379:6379"
+    volumes:
+      - redisdata:/data
+
+volumes:
+  pgdata:
+  redisdata:

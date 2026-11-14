@@ -1,0 +1,9 @@
+node_modules
+dist
+.git
+.superpowers
+coverage
+.env*
+docs
+deploy
+*.md

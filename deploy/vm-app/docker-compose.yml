@@ -1,0 +1,44 @@
+# vm-app: api + frontend (static) + Caddy (automatic HTTPS).
+# Build context paths assume KronosFrontend is a sibling of this repo.
+# Run from this directory:  docker compose --env-file .env up -d --build
+services:
+  api:
+    build:
+      context: ../..
+      target: api
+    env_file: .env
+    restart: always
+    stop_grace_period: 30s
+    expose:
+      - "3000"
+
+  frontend:
+    build:
+      context: ../../../KronosFrontend
+      args:
+        VITE_API_URL: ${VITE_API_URL}
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL}
+        VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY}
+        VITE_PUBLIC_URL: ${VITE_PUBLIC_URL}
+    restart: always
+    expose:
+      - "80"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN}
+      API_DOMAIN: ${API_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    depends_on:
+      - api
+      - frontend
+
+volumes:
+  caddy_data:
