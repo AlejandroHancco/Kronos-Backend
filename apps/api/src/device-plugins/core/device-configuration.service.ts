@@ -3,7 +3,7 @@ import { Device, Prisma } from '@prisma/client';
 import { PrismaService } from '@app/database';
 // Intermedio: la E/S de configuración live pasa al worker (device-ops) en tareas posteriores.
 import { DeviceDriverRegistry } from '@app/device-drivers';
-import { DeviceActivityService } from './device-activity.service';
+import { DeviceStateService } from '@app/redis';
 import {
   ConfigurationParameterMetadata,
   ConfigurationValue,
@@ -37,7 +37,7 @@ export class DeviceConfigurationService {
     private prisma: PrismaService,
     private catalog: LaasCatalog,
     private drivers: DeviceDriverRegistry,
-    private deviceActivity: DeviceActivityService,
+    private deviceState: DeviceStateService,
   ) {}
 
   async view(device: Device): Promise<DeviceConfigurationView> {
@@ -56,7 +56,7 @@ export class DeviceConfigurationService {
     return {
       deviceId: device.id,
       deviceType: description.deviceType,
-      busy: await this.deviceActivity.isBusy(device.id),
+      busy: await this.deviceState.isBusy(device.id),
       parameters: params.map((p) => ({ ...p, value: (p.storage === 'live' ? live[p.name] : effective[p.name]) ?? null })),
     };
   }
@@ -78,7 +78,7 @@ export class DeviceConfigurationService {
       throw new BadRequestException(`"${device.name}" no tiene IP configurada`);
     }
 
-    const updated = await this.deviceActivity.runConfiguration(device, async () => {
+    const updated = await this.deviceState.withExclusive(device, async () => {
       if (hasLive) {
         try {
           await this.drivers.get(device.type).applyLiveConfiguration!(toDeviceContext(device, description), live);

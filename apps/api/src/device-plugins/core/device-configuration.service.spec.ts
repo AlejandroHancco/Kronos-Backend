@@ -2,7 +2,8 @@ import { BadGatewayException, BadRequestException, ConflictException } from '@ne
 import axios from 'axios';
 import { HIOKI_IM3570, KRONOS_MUX_16, LaasCatalog, SIM_IMPEDANCE } from '@app/laas-catalog';
 import { DeviceDriverRegistry, HiokiIm3570Driver, KronosMux16Driver, SimulatedImpedanceDriver } from '@app/device-drivers';
-import { DeviceActivityService } from './device-activity.service';
+import RedisMock from 'ioredis-mock';
+import { DeviceStateService, RedisLockService } from '@app/redis';
 import { DeviceConfigurationService } from './device-configuration.service';
 
 jest.mock('axios');
@@ -17,12 +18,14 @@ function setup() {
   const catalog = new LaasCatalog([HIOKI_IM3570, KRONOS_MUX_16, SIM_IMPEDANCE]);
   const drivers = new DeviceDriverRegistry([new HiokiIm3570Driver(), mux, new SimulatedImpedanceDriver()]);
   const update = jest.fn(async ({ where, data }) => ({ ...device('sim-impedance'), id: where.id, ...data }));
-  const activity = new DeviceActivityService({
+  const redis = new RedisMock() as any;
+  const locks = new RedisLockService(redis);
+  const state = new DeviceStateService(redis, locks, {
     scheduledJob: { findMany: jest.fn(async () => []) },
     taskPreference: { findMany: jest.fn(async () => []) },
   } as any);
-  const service = new DeviceConfigurationService({ device: { update } } as any, catalog, drivers, activity);
-  return { service, update, activity };
+  const service = new DeviceConfigurationService({ device: { update } } as any, catalog, drivers, state);
+  return { service, update, locks };
 }
 
 const valueOf = (view: { parameters: Array<{ name: string; value: unknown }> }, name: string) =>
@@ -79,11 +82,11 @@ describe('DeviceConfigurationService', () => {
   });
 
   it('MUX midiendo → 409; fallo del dispositivo → 502', async () => {
-    const { service, activity } = setup();
-    const release = await activity.beginMeasurement(['kronos-mux-16-1']);
+    const { service, locks } = setup();
+    const token = await locks.tryAcquire('lock:device:kronos-mux-16-1', 60_000);
     await expect(service.apply(device('kronos-mux-16'), { channel: 3 })).rejects.toBeInstanceOf(ConflictException);
     expect((await service.view(device('kronos-mux-16'))).busy).toBe(true);
-    release();
+    await locks.release('lock:device:kronos-mux-16-1', token!);
     mockedGet.mockRejectedValue(new Error('ECONNREFUSED'));
     await expect(service.apply(device('kronos-mux-16'), { channel: 3 })).rejects.toThrow(
       new BadGatewayException('No se pudo aplicar la configuración en "MUX": No se pudo activar el canal 3 del MUX: ECONNREFUSED'),

@@ -1,7 +1,10 @@
 import { Global, Module, Logger, Provider } from '@nestjs/common';
 import Redis from 'ioredis';
 import { REDIS_CLIENT } from './redis.constants';
+import { PrismaModule } from '@app/database';
 import { RedisLockService } from './redis-lock.service';
+import { DeviceStateService } from './device-state.service';
+import { LiveValueStore } from './live-value.store';
 
 export { REDIS_CLIENT };
 
@@ -32,7 +35,8 @@ const redisProvider: Provider = {
 
 @Global()
 @Module({
-  providers: [redisProvider, RedisLockService],
-  exports: [redisProvider, RedisLockService],
+  imports: [PrismaModule],
+  providers: [redisProvider, RedisLockService, DeviceStateService, LiveValueStore],
+  exports: [redisProvider, RedisLockService, DeviceStateService, LiveValueStore],
 })
 export class RedisModule {}

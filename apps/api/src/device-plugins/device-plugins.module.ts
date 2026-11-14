@@ -7,7 +7,6 @@ import { DevicePluginsController } from './device-plugins.controller';
 import { PrismaModule } from '@app/database';
 import { PermissionsModule } from '../permissions/permissions.module';
 import { ExperimentCatalogService } from './core/experiment-catalog.service';
-import { DeviceActivityService } from './core/device-activity.service';
 import { DeviceConfigurationService } from './core/device-configuration.service';
 import { ExperimentsController, ProjectExperimentsController } from './core/experiments.controller';
 import { CommonModule } from '@app/common';
@@ -24,7 +23,6 @@ import { CommonModule } from '@app/common';
   controllers: [DevicePluginsController, ExperimentsController, ProjectExperimentsController],
   providers: [
     ExperimentCatalogService,
-    DeviceActivityService,
     DeviceConfigurationService,
   ],
   exports: [
@@ -32,7 +30,6 @@ import { CommonModule } from '@app/common';
     ExperimentsModule,
     DeviceDriversModule,
     ExperimentCatalogService,
-    DeviceActivityService,
     DeviceConfigurationService,
   ],
 })
