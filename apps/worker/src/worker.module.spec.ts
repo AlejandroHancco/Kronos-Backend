@@ -50,7 +50,13 @@ describe('WorkerModule', () => {
   });
 
   it('does not include the api KronosGateway', () => {
-    expect(() => moduleRef.get('KronosGateway', { strict: false })).toThrow();
+    const names = moduleRef
+      .get(DiscoveryService, { strict: false })
+      .getProviders()
+      .map((w) => w.metatype?.name);
+    expect(names).toContain('SchedulerService'); // discovery sees real providers
+    expect(names).not.toContain('KronosGateway');
+    expect(names).not.toContain('MeasurementsGateway');
   });
 
   it('exposes HealthController as its only controller', () => {

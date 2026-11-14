@@ -21,7 +21,6 @@ import { DashboardModule } from './dashboard/dashboard.module';
 import { HealthModule } from './health/health.module';
 import { SearchModule } from './search/search.module';
 import { ReportsModule } from './reports/reports.module';
-import { DevicePluginsModule } from '@app/device-plugins';
 import { GatewayModule } from './gateway/gateway.module';
 import { RedisModule } from '@app/redis';
 import { RealtimeModule } from '@app/realtime';
@@ -44,7 +43,6 @@ import { RlsMiddleware } from './prisma/prisma.middleware';
     ]),
     PrismaModule,
     CommonModule,
-    DevicePluginsModule,
     RedisModule,
     RealtimeModule,
     GatewayModule,

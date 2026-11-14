@@ -1,4 +1,4 @@
-import { INestApplicationContext } from '@nestjs/common';
+import { INestApplicationContext, Logger } from '@nestjs/common';
 import { IoAdapter } from '@nestjs/platform-socket.io';
 import { createAdapter } from '@socket.io/redis-adapter';
 import Redis from 'ioredis';
@@ -9,6 +9,7 @@ import { ServerOptions } from 'socket.io';
  * otros procesos (worker, vía Emitter) lleguen a los clientes de esta API.
  */
 export class RedisIoAdapter extends IoAdapter {
+  private readonly logger = new Logger(RedisIoAdapter.name);
   private pub: Redis;
   private sub: Redis;
 
@@ -20,6 +21,8 @@ export class RedisIoAdapter extends IoAdapter {
     }
     this.pub = new Redis(url);
     this.sub = this.pub.duplicate();
+    this.pub.on('error', (err) => this.logger.error(`Redis pub error: ${err.message}`));
+    this.sub.on('error', (err) => this.logger.error(`Redis sub error: ${err.message}`));
   }
 
   createIOServer(port: number, options?: ServerOptions) {

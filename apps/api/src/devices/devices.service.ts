@@ -1,18 +1,22 @@
-import { Injectable, HttpException, HttpStatus, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, HttpException, HttpStatus, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '@app/database';
 import { TeamScopeService } from '@app/common';
 import { CreateDeviceDto } from './dto/create-device.dto';
 import { UpdateDeviceDto } from './dto/update-device.dto';
 import { UpdateDeviceStatusDto } from './dto/update-device-status.dto';
 import { TestConnectionDto } from './dto/test-connection.dto';
-import { DevicePluginRegistry } from '@app/device-plugins';
+import { InjectQueue } from '@nestjs/bull';
+import type { Queue } from 'bull';
+import { DEVICE_OPS_QUEUE, TestConnectionJobData } from '@app/queue';
 
 @Injectable()
 export class DevicesService {
+  private readonly logger = new Logger(DevicesService.name);
+
   constructor(
       private prisma: PrismaService,
       private teamScope: TeamScopeService,
-      private devicePlugins: DevicePluginRegistry,
+      @InjectQueue(DEVICE_OPS_QUEUE) private deviceOpsQueue: Queue<TestConnectionJobData>,
   ) {}
 
   // ── Global: todos los dispositivos de proyectos del equipo del usuario ──────
@@ -123,11 +127,11 @@ export class DevicesService {
 
   // ── Test de conexión ───────────────────────────────────────────────────────
 
-  async testConnection(dto: TestConnectionDto) {
+  async testConnection(dto: TestConnectionDto): Promise<{ success: boolean; message: string }> {
     const { type, ip } = dto;
     const port = dto.port ?? 3570;
 
-    const reachable = await this.checkReachable(type, ip, port);
+    const reachable = await this.runTestConnectionJob(type, ip, port);
     if (reachable) {
       return {
         success: true,
@@ -143,12 +147,36 @@ export class DevicesService {
   }
 
   /**
-   * Chequeo crudo de alcanzabilidad (sin mensajes), usado también por el health check
-   * periódico. Delega en el plugin registrado para `type` — un dispositivo nuevo
-   * (type distinto) queda cubierto automáticamente con solo registrar su plugin.
+   * La API no abre sockets hacia el laboratorio: delega el chequeo en el worker
+   * vía la cola 'device-ops'. Cualquier fallo (Redis caído, timeout) cuenta como
+   * "no alcanzable".
    */
-  async checkReachable(type: string, ip: string, port = 3570): Promise<boolean> {
-    if (!this.devicePlugins.has(type)) return false;
-    return this.devicePlugins.get(type).testConnection(ip, type, port);
+  private async runTestConnectionJob(type: string, ip: string, port: number): Promise<boolean> {
+    const timeoutMs = Number(process.env.DEVICE_TEST_TIMEOUT_MS) || 5000;
+    let job: Awaited<ReturnType<Queue<TestConnectionJobData>['add']>> | undefined;
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      job = await this.deviceOpsQueue.add(
+        'test-connection',
+        { type, ip, port },
+        { attempts: 1, removeOnComplete: true, removeOnFail: true },
+      );
+      const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`timeout tras ${timeoutMs}ms`)), timeoutMs);
+      });
+      return Boolean(await Promise.race([job.finished(), timeout]));
+    } catch (err) {
+      this.logger.warn(`test-connection ${type} ${ip}:${port} falló: ${(err as Error).message}`);
+      if (job) {
+        try {
+          await job.remove();
+        } catch {
+          // best-effort
+        }
+      }
+      return false;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   }
 }
