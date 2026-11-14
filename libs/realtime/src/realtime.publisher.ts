@@ -1,20 +1,52 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { Emitter } from '@socket.io/redis-emitter';
 import type Redis from 'ioredis';
-import { REDIS_CLIENT } from '@app/redis';
 import { JobStatusPayload, NotificationPayload } from './payloads';
+import { REALTIME_REDIS_CLIENT } from './realtime.redis';
+
+type PublishClient = Pick<Redis, 'publish'> & Partial<Pick<Redis, 'quit' | 'disconnect'>>;
 
 /**
  * Publica eventos Socket.io vía Redis (emitter). Los gateways de la API
  * (con el adapter de Redis) los entregan a los clientes conectados.
+ *
+ * Usa un cliente Redis propio (REALTIME_REDIS_CLIENT). El emitter llama a
+ * publish() sin manejar la promesa: aquí se envuelve para que un fallo de
+ * Redis se registre como warning y nunca acabe en un unhandled rejection.
  */
 @Injectable()
-export class RealtimePublisher {
+export class RealtimePublisher implements OnModuleDestroy {
   private readonly logger = new Logger(RealtimePublisher.name);
   private readonly emitter: Emitter;
 
-  constructor(@Inject(REDIS_CLIENT) redis: Redis) {
-    this.emitter = new Emitter(redis);
+  constructor(@Inject(REALTIME_REDIS_CLIENT) private readonly redis: PublishClient) {
+    const safeClient = {
+      publish: (channel: string, message: string | Buffer): Promise<number> => {
+        try {
+          return Promise.resolve(redis.publish(channel, message)).catch((err: unknown) => {
+            this.logPublishFailure(channel, err);
+            return 0;
+          });
+        } catch (err) {
+          this.logPublishFailure(channel, err);
+          return Promise.resolve(0);
+        }
+      },
+    };
+    this.emitter = new Emitter(safeClient);
+  }
+
+  async onModuleDestroy(): Promise<void> {
+    try {
+      if (this.redis.quit) await this.redis.quit();
+    } catch {
+      this.redis.disconnect?.();
+    }
+  }
+
+  private logPublishFailure(channel: string, err: unknown): void {
+    const message = err instanceof Error ? err.message : String(err);
+    this.logger.warn(`Realtime publish failed on ${channel}: ${message}`);
   }
 
   private get kronos() {

@@ -4,6 +4,7 @@ import { getQueueToken } from '@nestjs/bull';
 import RedisMock from 'ioredis-mock';
 import { PrismaService } from '@app/database';
 import { REDIS_CLIENT } from '@app/redis';
+import { REALTIME_REDIS_CLIENT } from '@app/realtime';
 import { DEVICE_OPS_QUEUE, MEASUREMENTS_QUEUE } from '@app/queue';
 import { WorkerModule } from './worker.module';
 import { HealthController } from './health.controller';
@@ -23,6 +24,8 @@ describe('WorkerModule', () => {
       .overrideProvider(PrismaService)
       .useValue({})
       .overrideProvider(REDIS_CLIENT)
+      .useValue(new RedisMock())
+      .overrideProvider(REALTIME_REDIS_CLIENT)
       .useValue(new RedisMock())
       .overrideProvider(getQueueToken(MEASUREMENTS_QUEUE))
       .useValue(queueMock)

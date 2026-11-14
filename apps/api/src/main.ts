@@ -7,6 +7,13 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 import { RedisIoAdapter } from './realtime/redis-io.adapter';
 
+// Respaldo: un rechazo no manejado (p. ej. un corte de Redis en una librería)
+// se registra en lugar de tumbar el proceso (Node >= 15 sale por defecto).
+process.on('unhandledRejection', (reason) => {
+    const err = reason instanceof Error ? reason : new Error(String(reason));
+    Logger.error(`Unhandled promise rejection: ${err.message}`, err.stack, 'Process');
+});
+
 async function bootstrap() {
     const app = await NestFactory.create<NestExpressApplication>(AppModule);
     // Detrás de un proxy inverso (nginx): IP real para el rate limit
@@ -29,4 +36,9 @@ async function bootstrap() {
     await app.listen(port);
     Logger.log(`App corriendo en puerto ${port}`, 'Bootstrap');
 }
-void bootstrap();
+// El arranque fallido (p. ej. REDIS_URL ausente) debe seguir terminando el proceso.
+bootstrap().catch((err: unknown) => {
+    const e = err instanceof Error ? err : new Error(String(err));
+    Logger.error(`Bootstrap failed: ${e.message}`, e.stack, 'Bootstrap');
+    process.exit(1);
+});
