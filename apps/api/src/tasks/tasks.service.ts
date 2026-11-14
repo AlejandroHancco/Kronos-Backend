@@ -139,7 +139,8 @@ export class TasksService {
 
   async measure(taskId: number, dto: MeasureDto, userId: string) {
     await this.teamScope.assertTaskInTeam(userId, taskId);
-    const jobId = `${taskId}-${Date.now()}`;
+    // El frontend envía su propio jobId para casar measurement:* con su medición en curso
+    const jobId = dto.jobId || `${taskId}-${Date.now()}`;
     // Control de admisión: encola si hay capacidad, 409 si la cola está
     // llena o chocaría con una medición programada (mismos dispositivos)
     return this.schedulingService.requestMeasurement(taskId, userId, {

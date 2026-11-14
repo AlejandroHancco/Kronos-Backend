@@ -81,3 +81,40 @@ describe('MeasurementSchedulingService.checkAvailability', () => {
     await expect(service.checkAvailability(1, [{ points: 801 }], [1])).rejects.toThrow(BadRequestException);
   });
 });
+
+describe('MeasurementSchedulingService.requestMeasurement (id del job correlacionable)', () => {
+  function enqueueSetup() {
+    const prisma = { taskPreference: { findFirst: jest.fn(async () => null) } };
+    const realtime = { jobStatus: jest.fn() };
+    const experimentConfig = {
+      assertChannels: jest.fn(async () => undefined),
+      resolve: jest.fn(async () => ({ acquisition: hiokiAcq, selector: null })),
+    };
+    // Bull usa opts.jobId como job.id cuando se pasa; si no, genera uno propio (aquí 99)
+    const measurementQueue = {
+      add: jest.fn(async (_name: string, _data: any, opts: any) => ({ id: opts?.jobId ?? 99 })),
+      getJobs: jest.fn(async () => []),
+    };
+    const service = new MeasurementSchedulingService(prisma as any, realtime as any, experimentConfig as any, measurementQueue as any);
+    return { service, realtime, measurementQueue };
+  }
+
+  it('encola con { jobId: payload.jobId }: id devuelto = job:status = payload.jobId (measurement:*)', async () => {
+    const { service, realtime, measurementQueue } = enqueueSetup();
+    const res = await service.requestMeasurement(3, 'u1', { ranges: [{ points: 801 }] as any, selectedChannels: [1], jobId: '3-123' });
+    const [, payload, opts] = measurementQueue.add.mock.calls[0] as any[];
+    expect(payload.jobId).toBe('3-123');
+    expect(opts.jobId).toBe('3-123');
+    expect(res.jobId).toBe('3-123');
+    expect(realtime.jobStatus).toHaveBeenCalledWith('u1', { jobId: '3-123', taskId: 3, status: 'queued' });
+  });
+
+  it('sin jobId genera `${taskId}-<ts>` y lo usa como id del job de Bull', async () => {
+    const { service, measurementQueue } = enqueueSetup();
+    const res = await service.requestMeasurement(3, 'u1', { ranges: [{ points: 801 }] as any, selectedChannels: [1] });
+    const [, payload, opts] = measurementQueue.add.mock.calls[0] as any[];
+    expect(res.jobId).toMatch(/^3-\d+$/);
+    expect(payload.jobId).toBe(res.jobId);
+    expect(opts.jobId).toBe(res.jobId);
+  });
+});

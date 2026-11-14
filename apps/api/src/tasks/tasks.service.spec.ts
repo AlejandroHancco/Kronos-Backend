@@ -70,3 +70,25 @@ describe('TasksService.getMeasurements (lista de mediciones de la tarea)', () =>
     expect(m).not.toHaveProperty('sensorValues');
   });
 });
+
+describe('TasksService.measure (jobId del cliente)', () => {
+  function measureSetup() {
+    const teamScope = { assertTaskInTeam: jest.fn() };
+    const schedulingService = { requestMeasurement: jest.fn(async (_t: number, _u: string, p: any) => ({ jobId: p.jobId, status: 'queued' })) };
+    const service = new TasksService({} as any, teamScope as any, schedulingService as any, {} as any);
+    return { service, schedulingService };
+  }
+
+  it('respeta el jobId enviado por el cliente (casa con measurement:*)', async () => {
+    const { service, schedulingService } = measureSetup();
+    const res = await service.measure(3, { ranges: [], selectedChannels: [1], jobId: 'client-abc' } as any, 'u1');
+    expect(schedulingService.requestMeasurement).toHaveBeenCalledWith(3, 'u1', expect.objectContaining({ jobId: 'client-abc' }));
+    expect(res.jobId).toBe('client-abc');
+  });
+
+  it('sin jobId del cliente genera `${taskId}-<ts>`', async () => {
+    const { service, schedulingService } = measureSetup();
+    await service.measure(3, { ranges: [], selectedChannels: [1] } as any, 'u1');
+    expect(schedulingService.requestMeasurement).toHaveBeenCalledWith(3, 'u1', expect.objectContaining({ jobId: expect.stringMatching(/^3-\d+$/) }));
+  });
+});

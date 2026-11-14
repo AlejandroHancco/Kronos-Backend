@@ -196,7 +196,10 @@ export class MeasurementSchedulingService {
       estimatedSeconds: check.estimatedSeconds,
     };
 
+    // job.id de Bull = payload.jobId: job:status (el processor emite String(job.id)) y
+    // measurement:* (el ejecutor emite payload.jobId) comparten el mismo id, que es el devuelto.
     const job = await this.measurementQueue.add('execute', payload, {
+      jobId,
       attempts: 3,
       backoff: { type: 'exponential', delay: 2000 },
       removeOnComplete: 100,
