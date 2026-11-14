@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaService } from '@app/database';
 import { UpdateTaskChannelDto } from './dto/update-task-channel.dto';
 import { TaskChannelResponse } from './task-channels.types';
 

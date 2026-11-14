@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ScheduledJobsService } from './scheduled-jobs.service';
 import { ScheduledJobsController } from './scheduled-jobs.controller';
-import { PrismaModule } from '../prisma/prisma.module';
+import { PrismaModule } from '@app/database';
 
 @Module({
   imports: [PrismaModule],

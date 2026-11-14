@@ -2,7 +2,7 @@ import { Controller, Get, Param, Patch, Delete, Post, Body, UseGuards, Request }
 import { TeamsService } from './teams.service';
 import { CombinedAuthGuard } from '../auth/combined-auth.guard';
 import { PermissionGuard } from '../auth/guards/permission.guard';
-import { RequirePermission } from '../common/decorators/require-permission.decorator';
+import { RequirePermission } from '@app/common';
 import { UpdateMemberRoleDto } from './dto/update-member-role.dto';
 import { JoinTeamDto } from './dto/join-team.dto';
 

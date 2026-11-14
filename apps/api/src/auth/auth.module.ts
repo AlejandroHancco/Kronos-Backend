@@ -7,7 +7,7 @@ import { AuthController } from './auth.controller';
 import { JwtStrategy } from './jwt.strategy';
 import { SupabaseStrategy } from './supabase.strategy';
 import { CombinedAuthGuard } from './combined-auth.guard';
-import { PrismaModule } from '../prisma/prisma.module';
+import { PrismaModule } from '@app/database';
 
 @Module({
   imports: [

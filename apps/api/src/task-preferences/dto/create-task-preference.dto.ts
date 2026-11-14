@@ -12,7 +12,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { IsGreaterThan } from '../../common/validators/is-greater-than.decorator';
+import { IsGreaterThan } from '@app/common';
 
 export class TaskPreferenceRangeDto {
   @IsInt()

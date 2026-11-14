@@ -1,7 +1,7 @@
-import { Controller, Get, Inject, Optional } from '@nestjs/common';
+import { Controller, Get, Inject } from '@nestjs/common';
 import Redis from 'ioredis';
-import { PrismaService } from '../prisma/prisma.service';
-import { REDIS_CLIENT } from '../redis/redis.module';
+import { PrismaService } from '@app/database';
+import { REDIS_CLIENT } from '@app/redis';
 
 /**
  * Endpoint público de health check (sin guards).
@@ -11,7 +11,7 @@ import { REDIS_CLIENT } from '../redis/redis.module';
 export class HealthController {
   constructor(
     private prisma: PrismaService,
-    @Optional() @Inject(REDIS_CLIENT) private redis: Redis | null,
+    @Inject(REDIS_CLIENT) private redis: Redis,
   ) {}
 
   @Get()
@@ -36,7 +36,6 @@ export class HealthController {
   }
 
   private async checkRedis(): Promise<string> {
-    if (!this.redis) return 'not_configured';
     try {
       await this.redis.ping();
       return 'ok';

@@ -7,7 +7,7 @@ import {
   UseGuards,
   ParseIntPipe,
 } from '@nestjs/common';
-import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { MeasurementChannelsService } from './measurement-channels.service';
 import { UpdateMeasurementChannelDto } from './dto/update-measurement-channel.dto';
 

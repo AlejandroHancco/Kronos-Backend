@@ -1,11 +1,11 @@
 import { Injectable, HttpException, HttpStatus, NotFoundException } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
-import { TeamScopeService } from '../common/team-scope.service';
+import { PrismaService } from '@app/database';
+import { TeamScopeService } from '@app/common';
 import { CreateDeviceDto } from './dto/create-device.dto';
 import { UpdateDeviceDto } from './dto/update-device.dto';
 import { UpdateDeviceStatusDto } from './dto/update-device-status.dto';
 import { TestConnectionDto } from './dto/test-connection.dto';
-import { DevicePluginRegistry } from '../device-plugins/device-plugin.registry';
+import { DevicePluginRegistry } from '@app/device-plugins';
 
 @Injectable()
 export class DevicesService {

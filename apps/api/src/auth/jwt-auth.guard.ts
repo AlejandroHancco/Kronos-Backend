@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { CombinedAuthGuard } from '../../auth/combined-auth.guard';
+import { CombinedAuthGuard } from './combined-auth.guard';
 
 @Injectable()
 export class JwtAuthGuard extends CombinedAuthGuard {}

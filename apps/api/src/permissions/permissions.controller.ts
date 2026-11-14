@@ -2,7 +2,7 @@ import { Controller, Get, Patch, Param, Body, Req, UseGuards, ParseIntPipe } fro
 import { PermissionsService } from './permissions.service';
 import { CombinedAuthGuard } from '../auth/combined-auth.guard';
 import { PermissionGuard } from '../auth/guards/permission.guard';
-import { RequirePermission } from '../common/decorators/require-permission.decorator';
+import { RequirePermission } from '@app/common';
 
 @Controller()
 @UseGuards(CombinedAuthGuard, PermissionGuard)

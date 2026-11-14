@@ -1,5 +1,5 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaService } from '@app/database';
 import { KronosGateway } from '../gateway/kronos.gateway';
 
 const MEASUREMENT_EVENT_TYPES = ['MEASUREMENT_COMPLETE', 'MEASUREMENT_WARNING', 'MEASUREMENT_FAILED'];

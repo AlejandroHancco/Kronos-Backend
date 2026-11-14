@@ -1,7 +1,7 @@
 import { Controller, Get, Param, ParseIntPipe, Patch, UseGuards } from '@nestjs/common';
 import { NotificationsService } from './notifications.service';
 import { CombinedAuthGuard } from '../auth/combined-auth.guard';
-import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { CurrentUser } from '@app/common';
 import type { NormalizedUser } from '../auth/interfaces/auth.interface';
 
 @Controller('notifications')

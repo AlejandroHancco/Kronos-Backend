@@ -7,7 +7,7 @@ import {
   Put,
   UseGuards,
 } from '@nestjs/common';
-import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { TaskChannelsService } from './task-channels.service';
 import { UpdateTaskChannelDto } from './dto/update-task-channel.dto';
 

@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { PrismaModule } from '../prisma/prisma.module';
+import { PrismaModule } from '@app/database';
 import { PermissionsModule } from '../permissions/permissions.module';
 import { ReportsController } from './reports.controller';
 import { ReportsService } from './reports.service';

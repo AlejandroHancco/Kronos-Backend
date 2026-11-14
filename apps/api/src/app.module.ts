@@ -21,13 +21,12 @@ import { DashboardModule } from './dashboard/dashboard.module';
 import { HealthModule } from './health/health.module';
 import { SearchModule } from './search/search.module';
 import { ReportsModule } from './reports/reports.module';
-import { DevicePluginsModule } from './device-plugins/device-plugins.module';
+import { DevicePluginsModule } from '@app/device-plugins';
 import { GatewayModule } from './gateway/gateway.module';
-import { RedisModule } from './redis/redis.module';
-import { CommonModule } from './common/common.module';
-import { PrismaService } from './prisma/prisma.service';
+import { RedisModule } from '@app/redis';
+import { CommonModule } from '@app/common';
+import { PrismaService, PrismaModule } from '@app/database';
 import { RlsMiddleware } from './prisma/prisma.middleware';
-import { PrismaModule } from './prisma/prisma.module';
 
 @Module({
   imports: [

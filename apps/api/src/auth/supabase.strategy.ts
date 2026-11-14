@@ -6,7 +6,7 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { Request } from 'express';
 import * as jwt from 'jsonwebtoken';
 import { NormalizedUser } from './interfaces/auth.interface';
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaService } from '@app/database';
 
 interface SupabaseJwtPayload {
   sub: string;

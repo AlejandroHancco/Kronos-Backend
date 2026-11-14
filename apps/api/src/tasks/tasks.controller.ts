@@ -18,9 +18,9 @@ import { MeasureDto } from './dto/measure.dto';
 import { TaskPreferencesService } from '../task-preferences/task-preferences.service';
 import { CreateTaskPreferenceDto } from '../task-preferences/dto/create-task-preference.dto';
 import { UpdateTaskPreferenceDto } from '../task-preferences/dto/update-task-preference.dto';
-import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PermissionGuard } from '../auth/guards/permission.guard';
-import { RequirePermission } from '../common/decorators/require-permission.decorator';
+import { RequirePermission } from '@app/common';
 
 @Controller('tasks')
 @UseGuards(JwtAuthGuard, PermissionGuard)

@@ -1,10 +1,8 @@
 import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
 import { CombinedAuthGuard } from '../auth/combined-auth.guard';
 import { PermissionGuard } from '../auth/guards/permission.guard';
-import { RequirePermission } from '../common/decorators/require-permission.decorator';
-import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { RequirePermission, CurrentUser, TeamScopeService } from '@app/common';
 import type { NormalizedUser } from '../auth/interfaces/auth.interface';
-import { TeamScopeService } from '../common/team-scope.service';
 import { MeasurementSchedulingService } from './scheduling.service';
 import { CheckAvailabilityDto } from './dto/check-availability.dto';
 

@@ -1,6 +1,6 @@
 import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
 import { Device, Prisma, TaskPreference } from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaService } from '@app/database';
 import { CreateTaskPreferenceDto } from './dto/create-task-preference.dto';
 import { UpdateTaskPreferenceDto } from './dto/update-task-preference.dto';
 

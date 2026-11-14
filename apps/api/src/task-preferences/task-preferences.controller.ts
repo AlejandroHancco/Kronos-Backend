@@ -9,7 +9,7 @@ import {
   Put,
   UseGuards,
 } from '@nestjs/common';
-import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CreateTaskPreferenceDto } from './dto/create-task-preference.dto';
 import { UpdateTaskPreferenceDto } from './dto/update-task-preference.dto';
 import { TaskPreferencesService } from './task-preferences.service';
