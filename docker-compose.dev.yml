@@ -5,6 +5,8 @@ services:
       - "6379:6379"
 
   # Optional local Postgres: docker compose -f docker-compose.dev.yml --profile db up -d
+  # The init SQL creates the "platform" schema and sets search_path=platform,public
+  # (runs only on a fresh data directory).
   postgres:
     image: postgres:16-alpine
     profiles: ["db"]
@@ -14,3 +16,5 @@ services:
       POSTGRES_DB: smartconcrete
     ports:
       - "5432:5432"
+    volumes:
+      - ./deploy/vm-data/initdb:/docker-entrypoint-initdb.d:ro

@@ -31,18 +31,37 @@
 $ npm install
 ```
 
-## Compile and run the project
+## Development
+
+The repo is a Nest monorepo with two apps: `apps/api` (HTTP + Socket.io, `PORT` 3000, IEEE 1876 services under `/laas/v1`) and `apps/worker` (queue processors, device I/O, health on `HEALTH_PORT` 3001). Both require `REDIS_URL` and `DATABASE_URL`.
 
 ```bash
-# development
-$ npm run start
+# 1. Redis (add "--profile db" to also start a local Postgres)
+$ docker compose -f docker-compose.dev.yml up -d
+$ docker compose -f docker-compose.dev.yml --profile db up -d
 
-# watch mode
+# 2. Environment: copy .env.example to .env and fill in the placeholders
+$ cp .env.example .env
+
+# 3. Database schema and seed data
+$ npx prisma migrate deploy
+$ npm run seed
+
+# 4. api + worker in watch mode (output prefixed [api] / [worker])
 $ npm run start:dev
-
-# production mode
-$ npm run start:prod
 ```
+
+The local Postgres container runs `deploy/vm-data/initdb/01-platform-schema.sql` on first start. The migrations create tables unqualified while `schema.prisma` maps the models to the `platform` schema, so a fresh database needs `CREATE SCHEMA platform` and `search_path=platform,public` before `prisma migrate deploy`. If you use your own Postgres, run that SQL first (see also `deploy/README.md`).
+
+## Production
+
+```bash
+$ npm run build
+$ npm run start:api
+$ npm run start:worker
+```
+
+For the VM layout (vm-app, vm-worker, vm-data) see `deploy/README.md`.
 
 ## Run tests
 
