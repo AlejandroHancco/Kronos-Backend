@@ -33,7 +33,7 @@ describe('parseServiceDescription', () => {
           points: { minimum: 1, maximum: 2 }, scales: ['LIN'], secondsPerPoint: 1,
         },
       });
-    }, /mismo tipo de adquisición/],
+    }, /a lo sumo un sensor/],
     [(d: any) => { d.configuration[0].default = 99; }, /rs/],
     [(d: any) => { delete d.configuration[0].default; }, /default/],
     [(d: any) => { d.configuration[0].storage = 'fixed'; }, /solo lectura|read-only/],
@@ -42,6 +42,11 @@ describe('parseServiceDescription', () => {
     const d = valid(); mutate(d);
     expect(() => parseServiceDescription(d, 'demo')).toThrow(msg);
     expect(() => parseServiceDescription(d, 'demo')).toThrow(/service-description\.json de "demo"/);
+  });
+  it('un modelo con más de un sensor falla al cargar, citando el id del modelo (la atribución usa sensors[0])', () => {
+    const d: any = valid();
+    d.sensors.push({ ...d.sensors[0], sensorId: 's2', sensorValues: [{ name: 'w', unit: 'V', type: 'double' }] });
+    expect(() => parseServiceDescription(d, 'demo')).toThrow(/"demo-sensor".*a lo sumo un sensor/);
   });
   it('channelSelector debe apuntar a un valor entero con rango ≥ 1', () => {
     const d: any = valid();

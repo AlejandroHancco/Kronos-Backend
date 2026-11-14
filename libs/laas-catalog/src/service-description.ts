@@ -219,8 +219,11 @@ function parseDescription(raw: unknown): DeviceServiceDescription {
 
   const usedValueNames = new Set<string>();
   const sensors = arr('sensors', o.sensors).map((s, i) => sensor(`sensors[${i}]`, s, usedValueNames));
-  const kinds = new Set(sensors.map((s) => s.acquisition.kind));
-  if (kinds.size > 1) fail('sensors', 'todos los sensores de un dispositivo deben declarar el mismo tipo de adquisición');
+  // Un sensor por modelo: la atribución de mediciones (Measurement.sensorId) y la adquisición del
+  // dispositivo toman sensors[0]; un segundo sensor quedaría sin atribuir, así que se rechaza al cargar.
+  if (sensors.length > 1) {
+    fail('sensors', `el modelo "${deviceType}" declara ${sensors.length} sensores; cada modelo admite a lo sumo un sensor`);
+  }
   const actuators = arr('actuators', o.actuators).map((a, i) => actuator(`actuators[${i}]`, a));
   const configuration = arr('configuration', o.configuration ?? []).map((c, i) => configurationParameter(`configuration[${i}]`, c));
 

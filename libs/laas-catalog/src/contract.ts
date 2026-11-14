@@ -132,6 +132,10 @@ export interface DeviceServiceDescription {
   description: string;
   simulated: boolean;
   connection: DeviceConnection;
+  /**
+   * A lo sumo UN sensor por modelo (lo exige parseServiceDescription): la atribución de mediciones
+   * (Measurement.sensorId) y la adquisición del dispositivo usan sensors[0].
+   */
   sensors: SensorMetadata[];
   actuators: ActuatorMetadata[];
   /** Extensión Kronos: qué actuator/valor selecciona el canal. */
