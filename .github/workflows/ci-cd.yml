@@ -1,0 +1,41 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [develop]
+  pull_request:
+    branches: [develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Typecheck, test and build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npx tsc --noEmit -p tsconfig.json
+      - run: npx jest --ci
+      - run: npm run build
+
+  deploy:
+    name: Deploy to the PUCP slice
+    needs: test
+    # Only pushes/manual runs on develop ever reach the self-hosted runner (never PRs).
+    if: github.ref == 'refs/heads/develop' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: [self-hosted, kronos-app]
+    concurrency:
+      group: kronos-deploy
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy api (app VM) + worker (backend VM)
+        run: bash deploy/cicd/deploy-backend.sh "${{ github.sha }}"
