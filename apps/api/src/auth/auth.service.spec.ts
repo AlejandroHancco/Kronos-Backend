@@ -5,7 +5,7 @@ describe('AuthService.changePassword', () => {
   const prisma = { user: { findUnique: jest.fn(), update: jest.fn() } };
   const jwtService = { sign: jest.fn().mockReturnValue('tok') };
   const sessionEvents = { revokeUserSessions: jest.fn() };
-  const service = new AuthService(prisma as any, jwtService as any, {} as any, sessionEvents as any);
+  const service = new AuthService(prisma as any, jwtService as any, {} as any, sessionEvents as any, {} as any);
 
   beforeEach(() => jest.clearAllMocks());
 
@@ -78,5 +78,29 @@ describe('AuthService.changePassword', () => {
     await expect(service.changePassword('u', 'correcta1', newPassword)).resolves.toEqual({
       ok: true, access_token: 'tok',
     });
+  });
+});
+
+describe('AuthService.register', () => {
+  const prisma = { user: { create: jest.fn() } };
+  const jwtService = { sign: jest.fn().mockReturnValue('tok') };
+  const verification = { issueAndSend: jest.fn() };
+  const service = new AuthService(prisma as any, jwtService as any, {} as any, {} as any, verification as any);
+  const created = { uuid: 'u1', email: 'a@b.com', name: 'Ana' };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prisma.user.create.mockResolvedValue(created);
+  });
+
+  it('envía el correo de verificación y devuelve el JWT', async () => {
+    verification.issueAndSend.mockResolvedValue(undefined);
+    await expect(service.register('a@b.com', 'Ana', undefined, 'clave1234')).resolves.toEqual({ access_token: 'tok' });
+    expect(verification.issueAndSend).toHaveBeenCalledWith(created);
+  });
+
+  it('devuelve el JWT aunque el envío falle', async () => {
+    verification.issueAndSend.mockRejectedValue(new Error('brevo down'));
+    await expect(service.register('a@b.com', 'Ana', undefined, 'clave1234')).resolves.toEqual({ access_token: 'tok' });
   });
 });

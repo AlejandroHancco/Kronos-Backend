@@ -313,8 +313,24 @@ model User {
   scheduledJobs           ScheduledJob[]
   teamMembers             TeamMember[]
   activityEventRecipients ActivityEventRecipient[]
+  emailVerificationTokens EmailVerificationToken[]
 
   @@map("users")
+  @@schema("platform")
+}
+
+model EmailVerificationToken {
+  id        String    @id @default(uuid())
+  userId    String    @db.Uuid
+  tokenHash String    @unique
+  expiresAt DateTime  @db.Timestamptz(6)
+  usedAt    DateTime? @db.Timestamptz(6)
+  createdAt DateTime  @default(now()) @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [uuid], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("email_verification_tokens")
   @@schema("platform")
 }
 

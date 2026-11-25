@@ -1,13 +1,17 @@
 import { Controller, Request, Post, Get, UseGuards, Body, Query, BadRequestException, UnauthorizedException } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
+import { EmailVerificationService } from './email-verification.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CreateUserDto } from '../users/dto/create-user.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private authService: AuthService) {}
+  constructor(
+    private authService: AuthService,
+    private emailVerification: EmailVerificationService,
+  ) {}
 
   // Límite estricto: 5 intentos de login por minuto por IP
   @Throttle({ default: { ttl: 60000, limit: 5 } })
@@ -30,6 +34,20 @@ export class AuthController {
       createUserDto.lastName,
       createUserDto.password,
     );
+  }
+
+  // Público: el enlace del correo se abre antes de iniciar sesión
+  @Throttle({ default: { ttl: 60000, limit: 10 } })
+  @Post('verify-email')
+  async verifyEmail(@Body() body: { token: string }) {
+    return this.emailVerification.verify(body?.token);
+  }
+
+  @Throttle({ default: { ttl: 60000, limit: 3 } })
+  @UseGuards(JwtAuthGuard)
+  @Post('resend-verification')
+  async resendVerification(@Request() req) {
+    return this.emailVerification.resend(req.user.id);
   }
 
   @Get('check-email')

@@ -9,12 +9,15 @@ import { SupabaseStrategy } from './supabase.strategy';
 import { CombinedAuthGuard } from './combined-auth.guard';
 import { WsAuthService } from './ws-auth.service';
 import { PrismaModule } from '@app/database';
+import { MailModule } from '../mail/mail.module';
+import { EmailVerificationService } from './email-verification.service';
 
 @Module({
   imports: [
     ConfigModule,
     PassportModule,
     PrismaModule,
+    MailModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       useFactory: async (configService: ConfigService) => ({
@@ -25,7 +28,7 @@ import { PrismaModule } from '@app/database';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy, SupabaseStrategy, CombinedAuthGuard, WsAuthService],
+  providers: [AuthService, EmailVerificationService, JwtStrategy, SupabaseStrategy, CombinedAuthGuard, WsAuthService],
   exports: [AuthService, CombinedAuthGuard, WsAuthService],
 })
 export class AuthModule {}

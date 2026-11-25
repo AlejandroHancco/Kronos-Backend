@@ -1,17 +1,21 @@
-import { Injectable, UnauthorizedException, BadRequestException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, BadRequestException, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '@app/database';
 import { PermissionsService } from '../permissions/permissions.service';
 import { SessionEventsService } from '@app/common';
 import * as bcrypt from 'bcrypt';
+import { EmailVerificationService } from './email-verification.service';
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private prisma: PrismaService,
     private jwtService: JwtService,
     private permissionsService: PermissionsService,
     private sessionEvents: SessionEventsService,
+    private emailVerification: EmailVerificationService,
   ) {}
 
   async validateUser(email: string, password: string): Promise<any> {
@@ -77,6 +81,12 @@ export class AuthService {
         password: hashedPassword,
       },
     });
+    try {
+      await this.emailVerification.issueAndSend(user);
+    } catch (err) {
+      // Un fallo de envío no debe romper el registro; el usuario puede reenviar.
+      this.logger.error(`No se pudo enviar el correo de verificación a ${user.email}: ${(err as Error).message}`);
+    }
     return this.login(user);
   }
 
