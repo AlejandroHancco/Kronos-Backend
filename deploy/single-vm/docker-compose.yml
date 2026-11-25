@@ -1,0 +1,89 @@
+# Provisional single-VM deployment: the whole platform on the "app" VM
+# (used while the data/backend VMs have no network). Plain HTTP, reachable over
+# the PUCP network / VPN:
+#   frontend  -> http://<APP_IP>/
+#   api       -> http://<APP_IP>:3000   (REST + Socket.io + /laas/v1)
+# Postgres and Redis are NOT published; only containers on this compose network reach them.
+# Build context paths assume KronosFrontend is a sibling of this repo.
+# Run from this directory:  docker compose --env-file .env up -d --build
+services:
+  postgres:
+    image: postgres:${POSTGRES_IMAGE_TAG:-16}
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB required}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # First init only (empty volume): creates schema "platform" + search_path.
+      - ../vm-data/initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: always
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?REDIS_PASSWORD required}"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$${REDIS_PASSWORD}\" ping | grep PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+
+  api:
+    build:
+      context: ../..
+      target: api
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=platform
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+    restart: always
+    stop_grace_period: 30s
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: ../..
+      target: worker
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=platform
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+    restart: always
+    stop_grace_period: 2m
+    depends_on:
+      api:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ../../../KronosFrontend
+      args:
+        VITE_API_URL: ${VITE_API_URL}
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL}
+        VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY}
+        VITE_PUBLIC_URL: ${VITE_PUBLIC_URL}
+    restart: always
+    ports:
+      - "80:80"
+    depends_on:
+      - api
+
+volumes:
+  pgdata:
+  redisdata:
