@@ -73,11 +73,12 @@ services:
   frontend:
     build:
       context: ../../../KronosFrontend
-      args:
-        VITE_API_URL: ${VITE_API_URL}
-        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL}
-        VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY}
-        VITE_PUBLIC_URL: ${VITE_PUBLIC_URL}
+    # Read at container start (the image is built once, with placeholders).
+    environment:
+      VITE_API_URL: ${VITE_API_URL}
+      VITE_SUPABASE_URL: ${VITE_SUPABASE_URL}
+      VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY}
+      VITE_PUBLIC_URL: ${VITE_PUBLIC_URL}
     restart: always
     ports:
       - "80:80"

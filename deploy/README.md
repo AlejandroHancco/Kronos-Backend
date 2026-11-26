@@ -65,7 +65,7 @@ Postgres and Redis are published only on `PRIVATE_IP` of vm-data.
 | app | `PORT` (3000), `FRONTEND_URL`, `JWT_SECRET`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_JWT_SECRET`, `SCHEDULER_MAX_BACKLOG_SECONDS` (900), `DEVICE_TEST_TIMEOUT_MS` (5000), `DEVICE_OP_TIMEOUT_MS` (25000; must exceed the slowest driver live-op budget, Kronos MUX ~16 s) | api-only |
 | app | `LAAS_TITLE`, `LAAS_DESCRIPTION`, `LAAS_TERMS_URL`, `LAAS_CONTACT`, `LAAS_LICENSE`, `LAAS_LICENSE_URL`, `LAAS_BASE_URL` | IEEE 1876 service description (`/laas/v1`), optional |
 | app | `APP_DOMAIN`, `API_DOMAIN` | Caddy |
-| app | `VITE_API_URL`, `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_PUBLIC_URL` | frontend build args (baked at build time; rebuild to change) |
+| app | `VITE_API_URL`, `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_PUBLIC_URL` | frontend runtime config (applied when the container starts; `up -d` again to change) |
 
 `REDIS_URL` is required by both apps; they refuse to boot without it.
 
