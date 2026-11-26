@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '@app/database';
 import { TeamScopeService } from '@app/common';
 import { PermissionsService } from '../permissions/permissions.service';
@@ -143,6 +143,10 @@ export class ProjectsService {
     caller: NormalizedUser,
   ) {
     await this.teamScope.assertProjectInTeam(caller.id, projectId);
+
+    if (targetUserId === caller.id) {
+      throw new BadRequestException('No puedes cambiar tu propio rol');
+    }
 
     const [callerProjectRole, callerTeamMembership] = await Promise.all([
       this.prisma.userProjectRole.findUnique({
