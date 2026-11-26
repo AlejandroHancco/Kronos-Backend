@@ -18,6 +18,12 @@ WORKER_IMAGE="kronos-worker:${SHA:0:12}"
 
 log() { printf '\n==> %s\n' "$*"; }
 
+# One deploy at a time on this VM: the frontend workflow takes the same lock, so its
+# `docker image prune` can never delete layers a concurrent backend build is exporting.
+exec 9>/tmp/kronos-deploy.lock
+echo "Waiting for the deploy lock..."
+flock 9
+
 wait_healthy() { # <container> <timeout-seconds>
   local c="$1" t="$2" s=""
   for _ in $(seq 1 $((t / 5))); do
