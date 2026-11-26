@@ -2,13 +2,15 @@
 # Deploys api (app VM) + worker (backend VM) at a given commit. Run by the self-hosted
 # GitHub Actions runner on the app VM (user ubuntu, in the docker group).
 #   deploy-backend.sh <commit-sha>
-# Layout on the app VM:  ~/kronos/SmartConcreteBackend, ~/kronos/KronosFrontend (siblings),
-# deploy/vm-app-http/.env (api), worker reached over the internal network with ~/.ssh/kronos_internal.
+# The code comes from the runner's own checkout (works with private repos via GITHUB_TOKEN);
+# the app VM only keeps configuration: $CONF_DIR/vm-app-http/.env (api). The worker is
+# reached over the internal network with ~/.ssh/kronos_internal.
 set -euo pipefail
 
 SHA="${1:?usage: deploy-backend.sh <commit-sha>}"
-KRONOS_DIR="${KRONOS_DIR:-$HOME/kronos}"
-REPO_DIR="$KRONOS_DIR/SmartConcreteBackend"
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+CONF_DIR="${CONF_DIR:-$HOME/kronos/SmartConcreteBackend/deploy}"
+COMPOSE=(docker compose -p vm-app-http -f "$REPO_DIR/deploy/vm-app-http/docker-compose.yml" --env-file "$CONF_DIR/vm-app-http/.env")
 BACKEND_HOST="${BACKEND_HOST:-192.168.100.12}"
 SSH_KEY="${SSH_KEY:-$HOME/.ssh/kronos_internal}"
 SSH=(ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=accept-new "ubuntu@$BACKEND_HOST")
@@ -28,18 +30,16 @@ wait_healthy() { # <container> <timeout-seconds>
   return 1
 }
 
-log "Sync $REPO_DIR to $SHA"
-git -C "$REPO_DIR" fetch --quiet origin
-git -C "$REPO_DIR" checkout --quiet --force "$SHA"
-
-cd "$REPO_DIR/deploy/vm-app-http"
+log "Deploying $SHA from $REPO_DIR"
+# compose resolves `env_file: .env` next to the compose file: point it at the VM's config.
+ln -sf "$CONF_DIR/vm-app-http/.env" "$REPO_DIR/deploy/vm-app-http/.env"
 
 log "Build api and worker images"
-docker compose --env-file .env build api
+"${COMPOSE[@]}" build api
 docker build --quiet --target worker -t "$WORKER_IMAGE" "$REPO_DIR" >/dev/null
 
 log "Restart api (applies pending migrations on start)"
-docker compose --env-file .env up -d --no-deps api
+"${COMPOSE[@]}" up -d --no-deps api
 wait_healthy vm-app-http-api-1 240
 
 log "Ship worker image to backend ($BACKEND_HOST)"
