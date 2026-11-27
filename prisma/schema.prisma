@@ -305,6 +305,7 @@ model User {
   emailVerified           Boolean                  @default(false)
   rejectionCount          Int                      @default(0)
   banned                  Boolean                  @default(false)
+  isPlatformAdmin         Boolean                  @default(false)
   createdAt               DateTime?                @default(now()) @db.Timestamptz(6)
   passwordChangedAt       DateTime?                @db.Timestamptz(6)
   measurements            Measurement[]
@@ -314,6 +315,8 @@ model User {
   teamMembers             TeamMember[]
   activityEventRecipients ActivityEventRecipient[]
   emailVerificationTokens EmailVerificationToken[]
+  grantsInvited           TeamAdminGrant[]         @relation("GrantInvitedBy")
+  grantsClaimed           TeamAdminGrant[]         @relation("GrantClaimedBy")
 
   @@map("users")
   @@schema("platform")
@@ -341,8 +344,28 @@ model Team {
   createdAt      DateTime        @default(now())
   members        TeamMember[]
   activityEvents ActivityEvent[]
+  adminGrants    TeamAdminGrant[]
 
   @@map("teams")
+  @@schema("platform")
+}
+
+model TeamAdminGrant {
+  id          String    @id @default(uuid())
+  email       String
+  teamId      String
+  invitedById String    @db.Uuid
+  createdAt   DateTime  @default(now()) @db.Timestamptz(6)
+  claimedAt   DateTime? @db.Timestamptz(6)
+  claimedById String?   @db.Uuid
+  revokedAt   DateTime? @db.Timestamptz(6)
+
+  team      Team  @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  invitedBy User  @relation("GrantInvitedBy", fields: [invitedById], references: [uuid], onDelete: Restrict)
+  claimedBy User? @relation("GrantClaimedBy", fields: [claimedById], references: [uuid], onDelete: SetNull)
+
+  @@index([email])
+  @@map("team_admin_grants")
   @@schema("platform")
 }
 
