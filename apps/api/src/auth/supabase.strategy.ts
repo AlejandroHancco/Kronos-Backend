@@ -11,8 +11,27 @@ import { PrismaService } from '@app/database';
 interface SupabaseJwtPayload {
   sub: string;
   email?: string;
-  user_metadata?: { full_name?: string };
+  email_confirmed_at?: string | null;
+  user_metadata?: { full_name?: string; [key: string]: any };
+  app_metadata?: { provider?: string; providers?: string[]; [key: string]: any };
   [key: string]: any;
+}
+
+/**
+ * `app_metadata` solo lo escribe Supabase (no el usuario), así que es fiable para
+ * saber si la identidad viene de Google. `user_metadata` NO se usa para decisiones
+ * de confianza: el propio usuario puede modificarlo con `auth.updateUser({ data })`.
+ */
+function isGoogleIdentity(payload: SupabaseJwtPayload): boolean {
+  const meta = payload.app_metadata;
+  return (
+    meta?.provider === 'google' ||
+    (Array.isArray(meta?.providers) && meta.providers.includes('google'))
+  );
+}
+
+function hasConfirmedEmail(payload: SupabaseJwtPayload): boolean {
+  return typeof payload.email_confirmed_at === 'string' && payload.email_confirmed_at.length > 0;
 }
 
 @Injectable()
@@ -60,22 +79,34 @@ export class SupabaseStrategy extends PassportStrategy(Strategy, 'supabase') {
       throw new UnauthorizedException('Invalid token');
     }
 
+    // Solo se acepta una identidad de Supabase cuyo email esté probado: Google
+    // (ya verificó el email) o un email confirmado. Sin esto, cualquiera podría
+    // registrarse en Supabase con un email ajeno y entrar como su dueño.
+    const google = isGoogleIdentity(payload);
+    if (!google && !hasConfirmedEmail(payload)) {
+      throw new UnauthorizedException('Debes confirmar tu email antes de iniciar sesión');
+    }
+
     // Buscar o crear usuario en DB propia
     let dbUser = await this.prisma.user.findUnique({
       where: { email: payload.email },
     });
 
+    // El superadministrador solo entra con su contraseña (JWT propio), nunca vía Supabase.
+    if (dbUser?.isPlatformAdmin) {
+      throw new UnauthorizedException('Esta cuenta debe iniciar sesión con contraseña');
+    }
+
     if (!dbUser) {
-      // Crear usuario de Google en DB
       dbUser = await this.prisma.user.create({
         data: {
           email: payload.email,
           name: payload.user_metadata?.full_name?.split(' ')[0] || '',
           lastName:
             payload.user_metadata?.full_name?.split(' ').slice(1).join(' ') || '',
-          password: '', // No password for Google users
-          provider: 'google',
-          emailVerified: true, // Google ya verificó el email
+          password: '', // Sin contraseña: la identidad la gestiona Supabase
+          provider: google ? 'google' : 'supabase',
+          emailVerified: true, // Google o email confirmado (comprobado arriba)
           banned: false,
           rejectionCount: 0,
         },
@@ -100,11 +131,15 @@ export class SupabaseStrategy extends PassportStrategy(Strategy, 'supabase') {
    * 1. Local con SUPABASE_JWT_SECRET (rápida, sin red).
    * 2. Fallback remoto (supabase.auth.getUser) si no hay secret
    *    o si la verificación local falla (p.ej. proyecto con claves asimétricas).
+   *    También se consulta en remoto cuando el token local no prueba la identidad
+   *    (ni Google ni claim `email_confirmed_at`): el access token de Supabase no
+   *    trae la fecha de confirmación, y `user_metadata.email_verified` no es fiable.
    */
   private async verifyToken(token: string): Promise<SupabaseJwtPayload> {
     if (this.jwtSecret) {
       try {
-        return jwt.verify(token, this.jwtSecret) as SupabaseJwtPayload;
+        const local = jwt.verify(token, this.jwtSecret) as SupabaseJwtPayload;
+        if (isGoogleIdentity(local) || hasConfirmedEmail(local)) return local;
       } catch (err) {
         this.logger.debug(
           `Verificación local falló (${err.message}) — intentando verificación remota`,
@@ -124,7 +159,9 @@ export class SupabaseStrategy extends PassportStrategy(Strategy, 'supabase') {
     return {
       sub: user.id,
       email: user.email,
+      email_confirmed_at: user.email_confirmed_at ?? null,
       user_metadata: user.user_metadata as { full_name?: string },
+      app_metadata: user.app_metadata as { provider?: string; providers?: string[] },
     };
   }
 }
