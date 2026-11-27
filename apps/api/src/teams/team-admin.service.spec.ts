@@ -184,6 +184,30 @@ describe('TeamAdminService', () => {
     });
   });
 
+  describe('makeAdminInTx / applyRoleSideEffects', () => {
+    it('makeAdminInTx clears other PENDING/REJECTED rows and upserts ADMIN on the given client only', async () => {
+      const tx: any = { teamMember: { deleteMany: jest.fn().mockResolvedValue({ count: 1 }), upsert: jest.fn() } };
+      await svc.makeAdminInTx(tx, 't1', 'u1');
+      expect(tx.teamMember.deleteMany).toHaveBeenCalledWith({
+        where: { userId: 'u1', teamId: { not: 't1' }, status: { in: ['PENDING', 'REJECTED'] } },
+      });
+      expect(tx.teamMember.upsert).toHaveBeenCalledWith({
+        where: { userId_teamId: { userId: 'u1', teamId: 't1' } },
+        update: { role: 'ADMIN', status: 'APPROVED' },
+        create: { userId: 'u1', teamId: 't1', role: 'ADMIN', status: 'APPROVED' },
+      });
+      expect(prisma.teamMember.upsert).not.toHaveBeenCalled();
+      expect(permissions.invalidateUserCache).not.toHaveBeenCalled();
+    });
+
+    it('applyRoleSideEffects propagates the project role and invalidates the cache', async () => {
+      await svc.applyRoleSideEffects('t1', 'u1', 'ADMIN');
+      expect(prisma.userProjectRole.upsert).toHaveBeenCalledTimes(2);
+      expect(prisma.userProjectRole.upsert.mock.calls[0][0].update).toEqual({ roleId: 2 });
+      expect(permissions.invalidateUserCache).toHaveBeenCalledWith('u1');
+    });
+  });
+
   describe('adminBlockReason', () => {
     const base = { uuid: 'u1', banned: false, isPlatformAdmin: false };
 

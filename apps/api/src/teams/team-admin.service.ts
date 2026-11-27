@@ -46,6 +46,27 @@ export class TeamAdminService {
       });
       if (count === 0) throw new NotFoundException('Miembro no encontrado en el equipo');
     }
+    await this.applyRoleSideEffects(teamId, userId, role);
+  }
+
+  /**
+   * Hace ADMIN APPROVED al usuario usando el cliente dado (para usar dentro de una
+   * transacción) y borra sus solicitudes PENDING/REJECTED en otros equipos.
+   * No propaga roles de proyecto ni invalida caché: llamar a applyRoleSideEffects tras el commit.
+   */
+  async makeAdminInTx(client: Prisma.TransactionClient, teamId: string, userId: string): Promise<void> {
+    await client.teamMember.deleteMany({
+      where: {
+        userId,
+        teamId: { not: teamId },
+        status: { in: [MemberStatus.PENDING, MemberStatus.REJECTED] },
+      },
+    });
+    await this.adminUpsert(client, teamId, userId);
+  }
+
+  /** Propaga el rol de proyecto correspondiente e invalida la caché de permisos. */
+  async applyRoleSideEffects(teamId: string, userId: string, role: TeamAdminRole): Promise<void> {
     await this.propagateRoleToProjects(teamId, userId, role);
     await this.permissionsService.invalidateUserCache(userId);
   }
@@ -89,21 +110,13 @@ export class TeamAdminService {
           data: { claimedAt: new Date(), claimedById: userId },
         });
         if (count === 0) return false;
-        await tx.teamMember.deleteMany({
-          where: {
-            userId,
-            teamId: { not: grant.teamId },
-            status: { in: [MemberStatus.PENDING, MemberStatus.REJECTED] },
-          },
-        });
-        await this.adminUpsert(tx, grant.teamId, userId);
+        await this.makeAdminInTx(tx, grant.teamId, userId);
         return true;
       });
       if (!claimed) continue;
 
       try {
-        await this.propagateRoleToProjects(grant.teamId, userId, 'ADMIN');
-        await this.permissionsService.invalidateUserCache(userId);
+        await this.applyRoleSideEffects(grant.teamId, userId, 'ADMIN');
       } catch (err) {
         this.logger.error(
           `Grant ${grant.id} reclamado por ${userId}, pero falló la propagación de roles/caché`,

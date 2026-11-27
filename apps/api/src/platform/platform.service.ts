@@ -130,29 +130,21 @@ export class PlatformService {
     if (user) await this.assertNotBlocked(user, '');
     const adminUser = user?.emailVerified ? user : null;
 
-    const givenCode = dto.code?.trim() || undefined;
+    const givenCode = dto.code?.trim().toUpperCase() || undefined;
     for (let attempt = 1; ; attempt++) {
       const code = givenCode ?? generateTeamCode();
       try {
         const { team, grant } = await this.prisma.$transaction(async (tx) => {
           const team = await tx.team.create({ data: { name, code } });
           if (adminUser) {
-            await tx.teamMember.deleteMany({
-              where: { userId: adminUser.uuid, status: { in: [MemberStatus.PENDING, MemberStatus.REJECTED] } },
-            });
-            await tx.teamMember.create({
-              data: { userId: adminUser.uuid, teamId: team.id, role: 'ADMIN', status: MemberStatus.APPROVED },
-            });
+            await this.teamAdmin.makeAdminInTx(tx, team.id, adminUser.uuid);
             return { team, grant: null };
           }
           const grant = await tx.teamAdminGrant.create({ data: { email, teamId: team.id, invitedById } });
           return { team, grant };
         });
 
-        if (adminUser) {
-          // Propaga roles de proyecto y limpia la caché de permisos (idempotente).
-          await this.teamAdmin.setTeamRole(team.id, adminUser.uuid, 'ADMIN');
-        }
+        if (adminUser) await this.applyAdminSideEffects(team.id, adminUser.uuid);
         await this.sendNotice(user ? user.email : email, team.name);
 
         return {
@@ -194,15 +186,15 @@ export class PlatformService {
 
     let status: AddAdminStatus;
     if (user && user.emailVerified) {
-      // Mismo efecto que reclamar la invitación.
-      await this.prisma.teamMember.deleteMany({
-        where: {
-          userId: user.uuid,
-          teamId: { not: teamId },
-          status: { in: [MemberStatus.PENDING, MemberStatus.REJECTED] },
-        },
+      // Mismo efecto que reclamar la invitación, en una sola transacción.
+      await this.prisma.$transaction(async (tx) => {
+        await tx.teamAdminGrant.updateMany({
+          where: { email, teamId, ...OPEN_GRANT },
+          data: { claimedAt: new Date(), claimedById: user.uuid },
+        });
+        await this.teamAdmin.makeAdminInTx(tx, teamId, user.uuid);
       });
-      await this.teamAdmin.setTeamRole(teamId, user.uuid, 'ADMIN');
+      await this.applyAdminSideEffects(teamId, user.uuid);
       status = 'admin';
     } else {
       const open = await this.prisma.teamAdminGrant.findFirst({ where: { email, teamId, ...OPEN_GRANT } });
@@ -271,6 +263,21 @@ export class PlatformService {
     const reason = await this.teamAdmin.adminBlockReason(user, teamId);
     if (reason) return { status: 'blocked', reason };
     return { status: user.emailVerified ? 'pending' : 'pending_verification' };
+  }
+
+  /**
+   * Roles de proyecto + caché tras el commit. Un fallo se registra y no deshace la asignación
+   * (ni provoca un 500 que lleve a repetir la petición y duplicar el grupo).
+   */
+  private async applyAdminSideEffects(teamId: string, userId: string): Promise<void> {
+    try {
+      await this.teamAdmin.applyRoleSideEffects(teamId, userId, 'ADMIN');
+    } catch (err) {
+      this.logger.error(
+        `${userId} es ADMIN de ${teamId}, pero falló la propagación de roles/caché`,
+        err instanceof Error ? err.stack : String(err),
+      );
+    }
   }
 
   /** Un fallo de envío se registra y no deshace la asignación. */

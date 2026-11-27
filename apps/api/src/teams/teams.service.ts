@@ -29,7 +29,8 @@ export class TeamsService {
     const dbUser = await this.prisma.user.findUnique({ where: { uuid: user.id } });
     if (dbUser?.banned) throw new ForbiddenException('Tu cuenta ha sido suspendida');
 
-    const team = await this.prisma.team.findUnique({ where: { code } });
+    // Los códigos se guardan en mayúsculas.
+    const team = await this.prisma.team.findUnique({ where: { code: code.trim().toUpperCase() } });
     if (!team) throw new BadRequestException('Código inválido');
 
     const existing = await this.prisma.teamMember.findUnique({

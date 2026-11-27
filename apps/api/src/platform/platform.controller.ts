@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, Post, Request, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Post, Request, UseGuards } from '@nestjs/common';
 import { CombinedAuthGuard } from '../auth/combined-auth.guard';
 import { PlatformAdminGuard } from './platform-admin.guard';
 import { PlatformService } from './platform.service';
@@ -29,7 +29,7 @@ export class PlatformController {
 
   @Delete('teams/:id/admins/:userId')
   @HttpCode(204)
-  async removeAdmin(@Param('id') id: string, @Param('userId') userId: string) {
+  async removeAdmin(@Param('id') id: string, @Param('userId', ParseUUIDPipe) userId: string) {
     await this.platform.removeAdmin(id, userId);
   }
 

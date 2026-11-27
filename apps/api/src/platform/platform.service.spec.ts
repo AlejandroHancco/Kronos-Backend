@@ -17,7 +17,12 @@ describe('PlatformService', () => {
     $transaction: jest.fn(async (fn: (tx: any) => any) => fn(prisma)),
   };
   const mail = { send: jest.fn() };
-  const teamAdmin = { setTeamRole: jest.fn(), adminBlockReason: jest.fn() };
+  const teamAdmin = {
+    setTeamRole: jest.fn(),
+    adminBlockReason: jest.fn(),
+    makeAdminInTx: jest.fn(),
+    applyRoleSideEffects: jest.fn(),
+  };
   const config = { get: jest.fn((k: string) => (k === 'FRONTEND_URL' ? 'https://app.test/' : undefined)) };
   let svc: PlatformService;
 
@@ -34,6 +39,8 @@ describe('PlatformService', () => {
     prisma.teamMember.deleteMany.mockResolvedValue({ count: 0 });
     teamAdmin.adminBlockReason.mockResolvedValue(null);
     teamAdmin.setTeamRole.mockResolvedValue(undefined);
+    teamAdmin.makeAdminInTx.mockResolvedValue(undefined);
+    teamAdmin.applyRoleSideEffects.mockResolvedValue(undefined);
     mail.send.mockResolvedValue(undefined);
     svc = new PlatformService(prisma, teamAdmin as any, mail as any, config as any);
   });
@@ -47,7 +54,15 @@ describe('PlatformService', () => {
       expect(prisma.user.findFirst.mock.calls[0][0].where).toEqual({
         email: { equals: 'maria@pucp.edu.pe', mode: 'insensitive' },
       });
-      expect(teamAdmin.setTeamRole).toHaveBeenCalledWith('t1', 'u1', 'ADMIN');
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(teamAdmin.makeAdminInTx).toHaveBeenCalledWith(prisma, 't1', 'u1');
+      // Una invitación abierta previa para ese correo y grupo queda marcada como reclamada.
+      const mark = prisma.teamAdminGrant.updateMany.mock.calls[0][0];
+      expect(mark.where).toEqual({ email: 'maria@pucp.edu.pe', teamId: 't1', claimedAt: null, revokedAt: null });
+      expect(mark.data.claimedAt).toBeInstanceOf(Date);
+      expect(mark.data.claimedById).toBe('u1');
+      expect(teamAdmin.applyRoleSideEffects).toHaveBeenCalledWith('t1', 'u1', 'ADMIN');
+      expect(teamAdmin.setTeamRole).not.toHaveBeenCalled();
       expect(prisma.teamAdminGrant.create).not.toHaveBeenCalled();
       expect(mail.send).toHaveBeenCalledTimes(1);
       const msg = mail.send.mock.calls[0][0];
@@ -82,7 +97,7 @@ describe('PlatformService', () => {
       await expect(svc.addAdmin('t1', 'maria@pucp.edu.pe', 'sa')).resolves.toEqual({
         status: 'pending_verification',
       });
-      expect(teamAdmin.setTeamRole).not.toHaveBeenCalled();
+      expect(teamAdmin.makeAdminInTx).not.toHaveBeenCalled();
       expect(prisma.teamAdminGrant.create).toHaveBeenCalledTimes(1);
       expect(mail.send).toHaveBeenCalledTimes(1);
     });
@@ -95,7 +110,7 @@ describe('PlatformService', () => {
         const err = await svc.addAdmin('t1', 'maria@pucp.edu.pe', 'sa').catch((e) => e);
         expect(err).toBeInstanceOf(ConflictException);
         expect(err.message).toContain(reason);
-        expect(teamAdmin.setTeamRole).not.toHaveBeenCalled();
+        expect(teamAdmin.makeAdminInTx).not.toHaveBeenCalled();
         expect(prisma.teamAdminGrant.create).not.toHaveBeenCalled();
         expect(mail.send).not.toHaveBeenCalled();
       },
@@ -105,7 +120,14 @@ describe('PlatformService', () => {
       prisma.user.findFirst.mockResolvedValue(verifiedUser);
       mail.send.mockRejectedValue(new Error('Brevo caído'));
       await expect(svc.addAdmin('t1', 'maria@pucp.edu.pe', 'sa')).resolves.toEqual({ status: 'admin' });
-      expect(teamAdmin.setTeamRole).toHaveBeenCalled();
+      expect(teamAdmin.makeAdminInTx).toHaveBeenCalled();
+    });
+
+    it('keeps the admin when role propagation fails after commit', async () => {
+      prisma.user.findFirst.mockResolvedValue(verifiedUser);
+      teamAdmin.applyRoleSideEffects.mockRejectedValue(new Error('redis caído'));
+      await expect(svc.addAdmin('t1', 'maria@pucp.edu.pe', 'sa')).resolves.toEqual({ status: 'admin' });
+      expect(mail.send).toHaveBeenCalledTimes(1);
     });
 
     it('returns 404 for an unknown team', async () => {
@@ -197,12 +219,23 @@ describe('PlatformService', () => {
     it('makes a verified existing user the first admin', async () => {
       prisma.user.findFirst.mockResolvedValue(verifiedUser);
       const res = await svc.createTeam({ name: 'Lab', code: 'LAB-1', adminEmail: 'maria@pucp.edu.pe' }, 'sa');
-      expect(prisma.teamMember.create).toHaveBeenCalledWith({
-        data: { userId: 'u1', teamId: 't2', role: 'ADMIN', status: 'APPROVED' },
-      });
-      expect(teamAdmin.setTeamRole).toHaveBeenCalledWith('t2', 'u1', 'ADMIN');
+      expect(teamAdmin.makeAdminInTx).toHaveBeenCalledWith(prisma, 't2', 'u1');
+      expect(teamAdmin.applyRoleSideEffects).toHaveBeenCalledWith('t2', 'u1', 'ADMIN');
       expect(res.admins).toEqual([{ userId: 'u1', name: 'María', email: 'Maria@PUCP.edu.pe' }]);
       expect(res.memberCount).toBe(1);
+      expect(res.code).toBe('LAB-1');
+    });
+
+    it('still returns the created team when role propagation fails after commit', async () => {
+      prisma.user.findFirst.mockResolvedValue(verifiedUser);
+      teamAdmin.applyRoleSideEffects.mockRejectedValue(new Error('redis caído'));
+      const res = await svc.createTeam({ name: 'Lab', code: 'LAB-1', adminEmail: 'maria@pucp.edu.pe' }, 'sa');
+      expect(res).toMatchObject({ id: 't2', memberCount: 1 });
+      expect(mail.send).toHaveBeenCalledTimes(1);
+    });
+
+    it('upper-cases a generated or given code', async () => {
+      const res = await svc.createTeam({ name: 'Lab', code: ' lab-1 ', adminEmail: 'a@b.pe' }, 'sa');
       expect(res.code).toBe('LAB-1');
     });
 
@@ -264,9 +297,17 @@ describe('CreateTeamDto', () => {
     expect(dto).toMatchObject({ name: 'Lab', code: undefined, adminEmail: 'a@b.pe' });
   });
 
+  it('upper-cases the code', () => {
+    const dto = plainToInstance(CreateTeamDto, { name: 'Lab', code: ' giot-26 ', adminEmail: 'a@b.pe' });
+    expect(validateSync(dto)).toEqual([]);
+    expect(dto.code).toBe('GIOT-26');
+  });
+
   it('rejects bad name, code and email', () => {
     expect(errors({ name: '   ', adminEmail: 'a@b.pe' })).toEqual(['name']);
     expect(errors({ name: 'x'.repeat(101), adminEmail: 'a@b.pe' })).toEqual(['name']);
+    expect(errors({ name: 'Lab\nBcc: x', adminEmail: 'a@b.pe' })).toEqual(['name']);
+    expect(errors({ name: 'Lab\rX', adminEmail: 'a@b.pe' })).toEqual(['name']);
     expect(errors({ name: 'Lab', code: 'abc', adminEmail: 'a@b.pe' })).toEqual(['code']);
     expect(errors({ name: 'Lab', code: 'LAB_01', adminEmail: 'a@b.pe' })).toEqual(['code']);
     expect(errors({ name: 'Lab', adminEmail: 'nope' })).toEqual(['adminEmail']);

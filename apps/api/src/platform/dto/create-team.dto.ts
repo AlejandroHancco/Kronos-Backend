@@ -8,9 +8,13 @@ export class CreateTeamDto {
   @IsString()
   @IsNotEmpty({ message: 'El nombre es obligatorio' })
   @MaxLength(100, { message: 'El nombre admite como máximo 100 caracteres' })
+  @Matches(/^[^\r\n]+$/, { message: 'El nombre no puede contener saltos de línea' })
   name: string;
 
-  @Transform(({ value }) => (typeof value === 'string' && value.trim() === '' ? undefined : trim({ value })))
+  // Los códigos se guardan en mayúsculas (el ingreso con /teams/join también los normaliza).
+  @Transform(({ value }) =>
+    typeof value === 'string' ? (value.trim() === '' ? undefined : value.trim().toUpperCase()) : value,
+  )
   @IsOptional()
   @IsString()
   @Length(4, 20, { message: 'El código debe tener entre 4 y 20 caracteres' })

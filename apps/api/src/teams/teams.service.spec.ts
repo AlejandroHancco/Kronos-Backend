@@ -48,3 +48,20 @@ describe('TeamsService.updateMemberRole', () => {
     expect(teamAdmin.setTeamRole).toHaveBeenCalledWith('t1', 'u1', 'MEMBER');
   });
 });
+
+describe('TeamsService.joinTeam', () => {
+  const prisma: any = { user: { findUnique: jest.fn() }, team: { findUnique: jest.fn() } };
+  let svc: TeamsService;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prisma.user.findUnique.mockResolvedValue({ uuid: 'u1', banned: false });
+    prisma.team.findUnique.mockResolvedValue(null);
+    svc = new TeamsService(prisma, {} as any, {} as any, {} as any, {} as any);
+  });
+
+  it('looks the code up trimmed and upper-cased', async () => {
+    await expect(svc.joinTeam('  giot2026 ', { id: 'u1' } as any)).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.team.findUnique).toHaveBeenCalledWith({ where: { code: 'GIOT2026' } });
+  });
+});
