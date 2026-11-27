@@ -35,6 +35,14 @@ async function main() {
             'Ese usuario pertenece a un grupo (team_members). Quítalo del grupo primero.',
           );
         }
+        const projectRoles = await tx.userProjectRole.count({
+          where: { userId: existing.uuid },
+        });
+        if (projectRoles > 0) {
+          throw new Error(
+            'Ese usuario tiene roles en proyectos (user_project_roles). Quítale primero sus roles de proyecto.',
+          );
+        }
       }
       await tx.user.upsert({
         where: { email },
