@@ -33,7 +33,7 @@ export function readHidden(prompt: string): Promise<string> {
     process.once('exit', onExit);
     const onData = (chunk: string) => {
       // Escape sequences (arrows, Home, Delete, F-keys): ignore the whole chunk.
-      if (chunk.startsWith('001b')) return;
+      if (chunk.startsWith('\u001b')) return;
       for (const ch of chunk) {
         if (ch === '\u0003') {
           cleanup();
