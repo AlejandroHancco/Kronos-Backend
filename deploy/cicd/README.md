@@ -54,3 +54,16 @@ sudo ./svc.sh install ubuntu && sudo ./svc.sh start
 - Re-run a workflow from the Actions tab, or *Run workflow* (workflow_dispatch).
 - Roll back: re-run the deploy job of an older successful run; its image is still in GHCR, so it
   only downloads and restarts (no rebuild).
+
+## Superadministrador
+Create the platform superadmin, or reset its password, from the running api container:
+
+```bash
+docker exec -it vm-app-http-api-1 npx tsx prisma/create-platform-admin.ts admin@kronos.local
+```
+
+- The password is typed by the operator at a hidden prompt (asked twice); it is never accepted
+  via arguments or environment variables. `-it` is required (no TTY, no prompt).
+- Rules: at least 8 characters and at most 72 bytes (UTF-8).
+- Running it again for the same email resets the password and invalidates existing sessions.
+- It refuses users that belong to a group (`team_members`); remove them from the group first.
