@@ -22,6 +22,7 @@ export class ScheduledJobsService {
     return this.prisma.scheduledJob.create({
       data: {
         ...data,
+        seriesStartAt: data.startAt,
         taskId,
         createdBy: userId,
         status: 'pending',

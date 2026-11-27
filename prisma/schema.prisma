@@ -444,6 +444,7 @@ enum ScheduledJobStatus {
   completed
   failed
   cancelled
+  missed
 
   @@schema("platform")
 }
@@ -459,6 +460,15 @@ model ScheduledJob {
   repeatCount     Int      @default(1) // ejecuciones restantes (incluyendo esta)
   executionIndex  Int      @default(1) // posición en la cadena de repeticiones: 1, 2, 3...
 
+  // rejilla fija de la serie: la ejecución n corre en seriesStartAt + (n-1) * intervalMinutes
+  seriesStartAt    DateTime  @db.Timestamptz(6)
+  toleranceMinutes Int       @default(5)
+  reservedSeconds  Int       @default(600)
+  startedAt        DateTime? @db.Timestamptz(6)
+  finishedAt       DateTime? @db.Timestamptz(6)
+  delaySeconds     Int?
+  missReason       String?   @db.VarChar(40)
+
   status    ScheduledJobStatus @default(pending)
   createdAt DateTime?          @default(now()) @db.Timestamptz(6)
 
@@ -468,6 +478,7 @@ model ScheduledJob {
   measurements   Measurement[]
 
   @@index([taskId, startAt(sort: Asc)], map: "idx_scheduled_jobs_task_start")
+  @@index([status, startAt])
   @@map("scheduled_jobs")
   @@schema("platform")
 }

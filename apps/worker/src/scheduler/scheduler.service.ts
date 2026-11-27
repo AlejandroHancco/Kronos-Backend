@@ -116,6 +116,7 @@ export class SchedulerService {
       intervalMinutes: number | null;
       repeatCount: number;
       executionIndex: number;
+      seriesStartAt: Date;
       channelNumbers: number[];
     },
     now: Date,
@@ -199,6 +200,7 @@ export class SchedulerService {
           intervalMinutes: job.intervalMinutes,
           repeatCount: job.repeatCount - 1,       // repeticiones restantes
           executionIndex: job.executionIndex + 1, // posición en la cadena
+          seriesStartAt: job.seriesStartAt,
           channelNumbers: job.channelNumbers,
           status: 'pending',
         },
