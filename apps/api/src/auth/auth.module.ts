@@ -10,6 +10,7 @@ import { CombinedAuthGuard } from './combined-auth.guard';
 import { WsAuthService } from './ws-auth.service';
 import { PrismaModule } from '@app/database';
 import { MailModule } from '../mail/mail.module';
+import { TeamsModule } from '../teams/teams.module';
 import { EmailVerificationService } from './email-verification.service';
 
 @Module({
@@ -18,6 +19,7 @@ import { EmailVerificationService } from './email-verification.service';
     PassportModule,
     PrismaModule,
     MailModule,
+    TeamsModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       useFactory: async (configService: ConfigService) => ({

@@ -5,6 +5,7 @@ import { PermissionsService } from '../permissions/permissions.service';
 import { SessionEventsService } from '@app/common';
 import * as bcrypt from 'bcrypt';
 import { EmailVerificationService } from './email-verification.service';
+import { TeamAdminService } from '../teams/team-admin.service';
 
 @Injectable()
 export class AuthService {
@@ -16,6 +17,7 @@ export class AuthService {
     private permissionsService: PermissionsService,
     private sessionEvents: SessionEventsService,
     private emailVerification: EmailVerificationService,
+    private teamAdmin: TeamAdminService,
   ) {}
 
   async validateUser(email: string, password: string): Promise<any> {
@@ -95,9 +97,17 @@ export class AuthService {
       throw new UnauthorizedException('UUID no proporcionado');
     }
 
+    // Reclama invitaciones de admin pendientes antes de leer membresías; nunca rompe el perfil.
+    try {
+      await this.teamAdmin.claimPendingGrants(uuid);
+    } catch (err) {
+      this.logger.error(`No se pudieron reclamar las invitaciones pendientes de ${uuid}: ${(err as Error).message}`);
+    }
+
     const user = await this.prisma.user.findUnique({
       where: { uuid },
       select: {
+        isPlatformAdmin: true,
         uuid: true,
         email: true,
         name: true,

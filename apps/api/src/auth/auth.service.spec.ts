@@ -5,7 +5,7 @@ describe('AuthService.changePassword', () => {
   const prisma = { user: { findUnique: jest.fn(), update: jest.fn() } };
   const jwtService = { sign: jest.fn().mockReturnValue('tok') };
   const sessionEvents = { revokeUserSessions: jest.fn() };
-  const service = new AuthService(prisma as any, jwtService as any, {} as any, sessionEvents as any, {} as any);
+  const service = new AuthService(prisma as any, jwtService as any, {} as any, sessionEvents as any, {} as any, {} as any);
 
   beforeEach(() => jest.clearAllMocks());
 
@@ -85,7 +85,7 @@ describe('AuthService.register', () => {
   const prisma = { user: { create: jest.fn() } };
   const jwtService = { sign: jest.fn().mockReturnValue('tok') };
   const verification = { issueAndSend: jest.fn() };
-  const service = new AuthService(prisma as any, jwtService as any, {} as any, {} as any, verification as any);
+  const service = new AuthService(prisma as any, jwtService as any, {} as any, {} as any, verification as any, {} as any);
   const created = { uuid: 'u1', email: 'a@b.com', name: 'Ana' };
 
   beforeEach(() => {
@@ -102,5 +102,40 @@ describe('AuthService.register', () => {
   it('devuelve el JWT aunque el envío falle', async () => {
     verification.issueAndSend.mockRejectedValue(new Error('brevo down'));
     await expect(service.register('a@b.com', 'Ana', undefined, 'clave1234')).resolves.toEqual({ access_token: 'tok' });
+  });
+});
+
+describe('AuthService.getProfile', () => {
+  const prisma = { user: { findUnique: jest.fn() } };
+  const permissions = { getUserPermissions: jest.fn(), getUserRoleNames: jest.fn() };
+  const teamAdmin = { claimPendingGrants: jest.fn() };
+  const service = new AuthService(prisma as any, {} as any, permissions as any, {} as any, {} as any, teamAdmin as any);
+  const dbUser = { uuid: 'u1', email: 'a@b.com', name: 'Ana', isPlatformAdmin: true, teamMembers: [] };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prisma.user.findUnique.mockResolvedValue(dbUser);
+    permissions.getUserPermissions.mockResolvedValue([]);
+    permissions.getUserRoleNames.mockResolvedValue([]);
+    teamAdmin.claimPendingGrants.mockResolvedValue(0);
+  });
+
+  it('getProfile calls claimPendingGrants before reading memberships', async () => {
+    await service.getProfile('u1');
+    expect(teamAdmin.claimPendingGrants).toHaveBeenCalledWith('u1');
+    expect(teamAdmin.claimPendingGrants.mock.invocationCallOrder[0]).toBeLessThan(
+      prisma.user.findUnique.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('getProfile returns isPlatformAdmin', async () => {
+    const profile = await service.getProfile('u1');
+    expect(profile.isPlatformAdmin).toBe(true);
+    expect(prisma.user.findUnique.mock.calls[0][0].select.isPlatformAdmin).toBe(true);
+  });
+
+  it('getProfile still returns the profile when claimPendingGrants throws', async () => {
+    teamAdmin.claimPendingGrants.mockRejectedValue(new Error('boom'));
+    await expect(service.getProfile('u1')).resolves.toMatchObject({ uuid: 'u1' });
   });
 });
