@@ -174,3 +174,51 @@ describe('firstOverlap contra fuerza bruta', () => {
     }
   });
 });
+
+describe('suggestStart con salto (jump-ahead) contra búsqueda ingenua', () => {
+  /** La búsqueda original: probar cada paso de stepMinutes hasta el horizonte. */
+  function naive(
+    candidate: Omit<SeriesWindow, 'seriesStartAt'>,
+    others: SeriesWindow[],
+    from: Date,
+    stepMinutes: number,
+    horizonHours: number,
+  ): Date | null {
+    if (selfOverlaps({ ...candidate, seriesStartAt: from })) return null;
+    const steps = Math.floor((horizonHours * 60) / stepMinutes);
+    for (let i = 0; i <= steps; i++) {
+      const seriesStartAt = new Date(from.getTime() + i * stepMinutes * MIN);
+      if (others.every((o) => firstOverlap({ ...candidate, seriesStartAt }, o) === null)) return seriesStartAt;
+    }
+    return null;
+  }
+
+  it('devuelve el mismo resultado en una muestra pseudoaleatoria', () => {
+    let seed = 7;
+    const rnd = (n: number) => ((seed = (seed * 1103515245 + 12345) % 2147483648) % n);
+    let found = 0;
+    for (let iter = 0; iter < 400; iter++) {
+      const mk = (): SeriesWindow => {
+        const first = 1 + rnd(3);
+        const oneShot = rnd(4) === 0;
+        const intervalMinutes = oneShot ? null : 10 + rnd(80);
+        return {
+          seriesStartAt: new Date(t0.getTime() + rnd(300) * MIN + rnd(60) * 1000),
+          intervalMinutes,
+          firstIndex: first,
+          lastIndex: oneShot ? first : first + rnd(12),
+          reservedSeconds: 60 + rnd(intervalMinutes ? intervalMinutes * 60 - 59 : 3000),
+        };
+      };
+      const others = Array.from({ length: 1 + rnd(4) }, mk);
+      const c = mk();
+      const { seriesStartAt: from, ...candidate } = c;
+      const step = [1, 1, 5, 7][rnd(4)];
+      const horizon = 1 + rnd(12);
+      const expected = naive(candidate, others, from, step, horizon);
+      if (expected) found++;
+      expect(suggestStart(candidate, others, from, step, horizon)).toEqual(expected);
+    }
+    expect(found).toBeGreaterThan(50); // la muestra ejercita tanto huecos como horizontes agotados
+  });
+});

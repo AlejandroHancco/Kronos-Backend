@@ -34,6 +34,13 @@ export class ScheduledJobsController {
     return this.scheduledJobsService.findAll(req.user.id);
   }
 
+  /** Choques ya existentes entre series pendientes que comparten equipo (para marcarlos en el calendario). */
+  @Get('conflicts')
+  @RequirePermission('measurement:view')
+  findConflicts(@Request() req: any) {
+    return this.scheduledJobsService.findConflicts(req.user.id);
+  }
+
   @Get(':id')
   @RequirePermission('measurement:view')
   findOne(@Param('id') id: string, @Request() req: any) {

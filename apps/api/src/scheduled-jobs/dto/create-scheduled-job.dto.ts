@@ -20,6 +20,13 @@ export class CreateScheduledJobDto {
   @Min(1)
   repeatCount: number;
 
+  /** Minutos de retraso tolerados antes de dar la ejecución por perdida (por defecto 5). */
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(30)
+  toleranceMinutes?: number;
+
   @IsArray()
   @IsInt({ each: true })
   @Min(1, { each: true })

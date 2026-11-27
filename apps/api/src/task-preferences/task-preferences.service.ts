@@ -3,6 +3,7 @@ import { Device, Prisma, TaskPreference } from '@prisma/client';
 import { PrismaService } from '@app/database';
 import { TeamScopeService } from '@app/common';
 import { ExperimentConfigService, toSweepRanges } from '@app/experiments';
+import { estimateSeconds, ReservedSecondsUpdate, SeriesReservationsService } from '@app/measurement';
 import { invalidChannels } from '@app/laas-catalog';
 import { SweepRange } from '@app/laas-catalog';
 import { CreateTaskPreferenceDto, TaskPreferenceRangeDto } from './dto/create-task-preference.dto';
@@ -65,6 +66,7 @@ export class TaskPreferencesService {
     private readonly prisma: PrismaService,
     private readonly teamScope: TeamScopeService,
     private readonly experimentConfig: ExperimentConfigService,
+    private readonly seriesReservations: SeriesReservationsService,
   ) {}
 
   async getTaskPreference(taskId: number, userId: string): Promise<TaskPreferenceResponse | null> {
@@ -142,6 +144,7 @@ export class TaskPreferencesService {
   ): Promise<TaskPreferenceSaveResponse> {
     await this.teamScope.assertTaskInTeam(userId, taskId);
 
+    let reservedUpdates: ReservedSecondsUpdate[];
     {
       const current = await this.prisma.taskPreference.findUnique({
         where: { taskId },
@@ -154,7 +157,18 @@ export class TaskPreferencesService {
       const channelSelectorDeviceId =
         dto.channelSelectorDeviceId !== undefined ? dto.channelSelectorDeviceId : current.channelSelectorDeviceId;
       const ranges = dto.ranges ? toValidationRanges(dto.ranges) : toSweepRanges(current.ranges);
-      await this.experimentConfig.assertValidConfig(taskId, sensorDeviceId, channelSelectorDeviceId ?? null, ranges);
+      const acquisition = await this.experimentConfig.assertValidConfig(
+        taskId,
+        sensorDeviceId,
+        channelSelectorDeviceId ?? null,
+        ranges,
+      );
+      // Series pendientes de la tarea: con los nuevos dispositivos y la nueva reserva no pueden pisar
+      // otras series (409 y no se guarda). Sin series pendientes no hace nada.
+      const devices = channelSelectorDeviceId ? [sensorDeviceId, channelSelectorDeviceId] : [sensorDeviceId];
+      reservedUpdates = await this.seriesReservations.revalidateTask(taskId, devices, (channelCount) =>
+        estimateSeconds(acquisition, ranges, channelCount, !!channelSelectorDeviceId),
+      );
     }
 
     try {
@@ -184,6 +198,7 @@ export class TaskPreferencesService {
           },
         },
       });
+      await this.seriesReservations.applyReservedSeconds(reservedUpdates);
 
       return { ...this.mapToResponse(preference), warnings: await this.scheduledJobWarnings(taskId, preference) };
     } catch (error: unknown) {

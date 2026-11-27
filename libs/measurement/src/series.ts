@@ -125,6 +125,12 @@ export function reservedSecondsFor(estimateSeconds: number, actualDurationsSecon
 /**
  * Primer inicio ≥ `from` (en pasos de `stepMinutes`, hasta `from + horizonHours` inclusive) en el
  * que la serie candidata no se solapa con ninguna de `others` ni consigo misma; null si no hay.
+ *
+ * Salto (jump-ahead): si la ocurrencia `aIndex` del candidato (inicio ta) choca con la ocurrencia
+ * `bIndex` de otra serie (inicio tb, reserva Rb), todo desplazamiento d < tb + Rb − ta sigue
+ * chocando con ese mismo par (ta + d sigue dentro de [ta, tb + Rb) y ta + Ra > tb). Así que se
+ * avanza al primer paso ≥ ese desplazamiento en vez de probar paso a paso; mismo resultado que
+ * la búsqueda ingenua.
  */
 export function suggestStart(
   candidate: Omit<SeriesWindow, 'seriesStartAt'>,
@@ -138,10 +144,20 @@ export function suggestStart(
   const fromMs = from.getTime();
   const stepMs = stepMinutes * MS_PER_MIN;
   const steps = Math.floor((horizonHours * 60 * MS_PER_MIN) / stepMs);
-  for (let i = 0; i <= steps; i++) {
-    const seriesStartAt = new Date(fromMs + i * stepMs);
-    const c: SeriesWindow = { ...candidate, seriesStartAt };
-    if (others.every((o) => firstOverlap(c, o) === null)) return seriesStartAt;
+  let i = 0;
+  while (i <= steps) {
+    const startMs = fromMs + i * stepMs;
+    const c: SeriesWindow = { ...candidate, seriesStartAt: new Date(startMs) };
+    let clearFromMs = startMs; // primer inicio que podría estar libre de todos los choques vistos
+    for (const o of others) {
+      const hit = firstOverlap(c, o);
+      if (!hit) continue;
+      const ta = occurrenceStart(c, hit.aIndex).getTime();
+      const tbEnd = occurrenceStart(o, hit.bIndex).getTime() + o.reservedSeconds * 1000;
+      clearFromMs = Math.max(clearFromMs, startMs + (tbEnd - ta));
+    }
+    if (clearFromMs === startMs) return c.seriesStartAt;
+    i = Math.max(i + 1, Math.ceil((clearFromMs - fromMs) / stepMs));
   }
   return null;
 }

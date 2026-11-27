@@ -6,10 +6,11 @@ import { RealtimeModule } from '@app/realtime';
 import { DeviceDriversModule } from '@app/device-drivers';
 import { NotificationsModule } from '@app/notifications';
 import { MeasurementExecutor } from './measurement.executor';
+import { SeriesReservationsModule } from './series-reservations.module';
 
 @Module({
-  imports: [PrismaModule, CommonModule, ExperimentsModule, DeviceDriversModule, NotificationsModule, RealtimeModule],
+  imports: [PrismaModule, CommonModule, ExperimentsModule, DeviceDriversModule, NotificationsModule, RealtimeModule, SeriesReservationsModule],
   providers: [MeasurementExecutor],
-  exports: [MeasurementExecutor],
+  exports: [MeasurementExecutor, SeriesReservationsModule],
 })
 export class MeasurementModule {}

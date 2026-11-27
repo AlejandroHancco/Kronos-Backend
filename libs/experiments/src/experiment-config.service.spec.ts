@@ -39,10 +39,10 @@ describe('ExperimentConfigService.assertValidConfig (rangos por sensor)', () => 
     );
   });
 
-  it('acepta un rango dentro de los límites del Hioki', async () => {
+  it('acepta un rango dentro de los límites del Hioki y devuelve su adquisición', async () => {
     await expect(
       serviceForValidConfig(hioki).assertValidConfig(7, 's', null, [{ start: 50000, stop: 500000, points: 801, scale: 'LOG' }]),
-    ).resolves.toBeUndefined();
+    ).resolves.toEqual(expect.objectContaining({ kind: 'sweep', secondsPerPoint: expect.any(Number) }));
   });
 });
 

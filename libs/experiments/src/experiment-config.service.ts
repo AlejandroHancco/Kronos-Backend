@@ -52,7 +52,8 @@ export const toSweepRanges = (rows: { start: Prisma.Decimal | number; stop: Pris
 export class ExperimentConfigService {
   constructor(private prisma: PrismaService, private catalog: LaasCatalog) {}
 
-  async assertValidConfig(taskId: number, sensorDeviceId: string, channelSelectorDeviceId: string | null, ranges: SweepRange[]): Promise<void> {
+  /** Valida la configuración y devuelve la adquisición del sensor (para estimar duraciones con ella). */
+  async assertValidConfig(taskId: number, sensorDeviceId: string, channelSelectorDeviceId: string | null, ranges: SweepRange[]): Promise<AcquisitionMetadata> {
     const task = await this.prisma.task.findUnique({ where: { id: taskId }, select: { projectId: true } });
     if (!task) throw new NotFoundException('Task not found');
     const sensor = await this.prisma.device.findUnique({ where: { id: sensorDeviceId } });
@@ -70,8 +71,10 @@ export class ExperimentConfigService {
     });
     if (error) throw new BadRequestException(error);
     const d = this.catalog.describe(sensor.type!);
-    const rangeError = rangesError(acquisitionOf(d)!, ranges, d.shortName);
+    const acquisition = acquisitionOf(d)!;
+    const rangeError = rangesError(acquisition, ranges, d.shortName);
     if (rangeError) throw new BadRequestException(rangeError);
+    return acquisition;
   }
 
   /** Rangos de barrido contra la adquisición ya resuelta del sensor (usado por measureTask). */
