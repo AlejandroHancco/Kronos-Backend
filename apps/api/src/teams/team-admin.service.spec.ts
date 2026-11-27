@@ -1,18 +1,20 @@
-import { TeamAdminService } from './team-admin.service';
+import { NotFoundException } from '@nestjs/common';
+import { TeamAdminService, projectRoleIdFor } from './team-admin.service';
 
 describe('TeamAdminService', () => {
   const prisma: any = {
     user: { findUnique: jest.fn() },
-    teamAdminGrant: { findMany: jest.fn(), update: jest.fn() },
+    teamAdminGrant: { findMany: jest.fn(), updateMany: jest.fn() },
     teamMember: {
       upsert: jest.fn(),
       findFirst: jest.fn(),
       findMany: jest.fn(),
       deleteMany: jest.fn(),
+      updateMany: jest.fn(),
     },
     project: { findMany: jest.fn() },
     userProjectRole: { upsert: jest.fn() },
-    $transaction: jest.fn(async (ops: any[]) => Promise.all(ops)),
+    $transaction: jest.fn(async (fn: (tx: any) => any) => fn(prisma)),
   };
   const permissions = { invalidateUserCache: jest.fn() };
   let svc: TeamAdminService;
@@ -40,7 +42,8 @@ describe('TeamAdminService', () => {
     prisma.teamMember.findMany.mockResolvedValue([{ userId: 'u1' }, { userId: 'u2' }]);
     prisma.project.findMany.mockResolvedValue([{ uuid: 'p1' }, { uuid: 'p2' }]);
     prisma.userProjectRole.upsert.mockResolvedValue({});
-    prisma.teamAdminGrant.update.mockResolvedValue({});
+    prisma.teamAdminGrant.updateMany.mockResolvedValue({ count: 1 });
+    prisma.teamMember.updateMany.mockResolvedValue({ count: 1 });
     permissions.invalidateUserCache.mockResolvedValue(undefined);
     svc = new TeamAdminService(prisma, permissions as any);
   });
@@ -59,8 +62,8 @@ describe('TeamAdminService', () => {
         update: { role: 'ADMIN', status: 'APPROVED' },
         create: { userId: 'u1', teamId: 't1', role: 'ADMIN', status: 'APPROVED' },
       });
-      const grantUpdate = prisma.teamAdminGrant.update.mock.calls[0][0];
-      expect(grantUpdate.where).toEqual({ id: 'g1' });
+      const grantUpdate = prisma.teamAdminGrant.updateMany.mock.calls[0][0];
+      expect(grantUpdate.where).toEqual({ id: 'g1', claimedAt: null, revokedAt: null });
       expect(grantUpdate.data.claimedAt).toBeInstanceOf(Date);
       expect(grantUpdate.data.claimedById).toBe('u1');
       expect(prisma.$transaction).toHaveBeenCalledTimes(1);
@@ -78,7 +81,7 @@ describe('TeamAdminService', () => {
 
       await expect(svc.claimPendingGrants('u1')).resolves.toBe(0);
       expect(prisma.teamMember.upsert).not.toHaveBeenCalled();
-      expect(prisma.teamAdminGrant.update).not.toHaveBeenCalled();
+      expect(prisma.teamAdminGrant.updateMany).not.toHaveBeenCalled();
     });
 
     it('returns 0 for an unknown user', async () => {
@@ -100,7 +103,7 @@ describe('TeamAdminService', () => {
         expect(call[0].where).toMatchObject({ claimedAt: null, revokedAt: null });
       }
       expect(prisma.teamMember.upsert).toHaveBeenCalledTimes(1);
-      expect(prisma.teamAdminGrant.update).toHaveBeenCalledTimes(1);
+      expect(prisma.teamAdminGrant.updateMany).toHaveBeenCalledTimes(1);
     });
 
     it('leaves the grant open when the user is APPROVED in another team', async () => {
@@ -114,7 +117,7 @@ describe('TeamAdminService', () => {
 
       await expect(svc.claimPendingGrants('u1')).resolves.toBe(0);
       expect(prisma.teamMember.upsert).not.toHaveBeenCalled();
-      expect(prisma.teamAdminGrant.update).not.toHaveBeenCalled();
+      expect(prisma.teamAdminGrant.updateMany).not.toHaveBeenCalled();
     });
 
     it('leaves the grant open when the user is banned', async () => {
@@ -123,7 +126,7 @@ describe('TeamAdminService', () => {
 
       await expect(svc.claimPendingGrants('u1')).resolves.toBe(0);
       expect(prisma.teamMember.upsert).not.toHaveBeenCalled();
-      expect(prisma.teamAdminGrant.update).not.toHaveBeenCalled();
+      expect(prisma.teamAdminGrant.updateMany).not.toHaveBeenCalled();
     });
 
     it('deletes PENDING/REJECTED memberships in other teams when claiming', async () => {
@@ -145,8 +148,39 @@ describe('TeamAdminService', () => {
       ]);
 
       await expect(svc.claimPendingGrants('u1')).resolves.toBe(1);
-      expect(prisma.teamAdminGrant.update).toHaveBeenCalledTimes(1);
-      expect(prisma.teamAdminGrant.update.mock.calls[0][0].where).toEqual({ id: 'g1' });
+      expect(prisma.teamAdminGrant.updateMany).toHaveBeenCalledTimes(1);
+      expect(prisma.teamAdminGrant.updateMany.mock.calls[0][0].where).toMatchObject({ id: 'g1' });
+    });
+    it('aborts without member changes when the grant was claimed concurrently', async () => {
+      prisma.user.findUnique.mockResolvedValue(verifiedUser);
+      prisma.teamAdminGrant.findMany.mockResolvedValue([openGrant]);
+      prisma.teamAdminGrant.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(svc.claimPendingGrants('u1')).resolves.toBe(0);
+      expect(prisma.teamMember.deleteMany).not.toHaveBeenCalled();
+      expect(prisma.teamMember.upsert).not.toHaveBeenCalled();
+      expect(prisma.userProjectRole.upsert).not.toHaveBeenCalled();
+      expect(permissions.invalidateUserCache).not.toHaveBeenCalled();
+    });
+
+    it('marks the grant before touching memberships', async () => {
+      prisma.user.findUnique.mockResolvedValue(verifiedUser);
+      prisma.teamAdminGrant.findMany.mockResolvedValue([openGrant]);
+
+      await svc.claimPendingGrants('u1');
+      const grantOrder = prisma.teamAdminGrant.updateMany.mock.invocationCallOrder[0];
+      expect(grantOrder).toBeLessThan(prisma.teamMember.deleteMany.mock.invocationCallOrder[0]);
+      expect(grantOrder).toBeLessThan(prisma.teamMember.upsert.mock.invocationCallOrder[0]);
+    });
+
+    it('does not throw when propagation or cache invalidation fails after claiming', async () => {
+      prisma.user.findUnique.mockResolvedValue(verifiedUser);
+      prisma.teamAdminGrant.findMany.mockResolvedValue([openGrant]);
+      permissions.invalidateUserCache.mockRejectedValue(new Error('redis down'));
+      const logSpy = jest.spyOn((svc as any).logger, 'error').mockImplementation(() => undefined);
+
+      await expect(svc.claimPendingGrants('u1')).resolves.toBe(1);
+      expect(logSpy).toHaveBeenCalled();
     });
   });
 
@@ -182,12 +216,11 @@ describe('TeamAdminService', () => {
     it("setTeamRole('t1','u1','MEMBER') upserts role 4 on the team projects and invalidates cache", async () => {
       await svc.setTeamRole('t1', 'u1', 'MEMBER');
 
-      expect(prisma.teamMember.upsert).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { userId_teamId: { userId: 'u1', teamId: 't1' } },
-          update: { role: 'MEMBER' },
-        }),
-      );
+      expect(prisma.teamMember.updateMany).toHaveBeenCalledWith({
+        where: { userId: 'u1', teamId: 't1' },
+        data: { role: 'MEMBER' },
+      });
+      expect(prisma.teamMember.upsert).not.toHaveBeenCalled();
       expect(prisma.teamMember.findMany).toHaveBeenCalledWith({
         where: { teamId: 't1', status: 'APPROVED' },
         select: { userId: true },
@@ -203,6 +236,20 @@ describe('TeamAdminService', () => {
         create: { userId: 'u1', projectId: 'p2', roleId: 4 },
       });
       expect(permissions.invalidateUserCache).toHaveBeenCalledWith('u1');
+    });
+
+    it('MEMBER on a missing membership throws NotFoundException and creates nothing', async () => {
+      prisma.teamMember.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(svc.setTeamRole('t1', 'u9', 'MEMBER')).rejects.toBeInstanceOf(NotFoundException);
+      expect(prisma.teamMember.upsert).not.toHaveBeenCalled();
+      expect(prisma.userProjectRole.upsert).not.toHaveBeenCalled();
+      expect(permissions.invalidateUserCache).not.toHaveBeenCalled();
+    });
+
+    it('projectRoleIdFor maps ADMIN to 2 and MEMBER to 4', () => {
+      expect(projectRoleIdFor('ADMIN')).toBe(2);
+      expect(projectRoleIdFor('MEMBER')).toBe(4);
     });
 
     it('ADMIN sets status APPROVED and role id 2', async () => {

@@ -8,13 +8,11 @@ import { PrismaService } from '@app/database';
 import { TeamScopeService } from '@app/common';
 import { PermissionsService } from '../permissions/permissions.service';
 import { NotificationsService } from '../notifications/notifications.service';
-import { TeamAdminService } from './team-admin.service';
+import { TeamAdminService, projectRoleIdFor } from './team-admin.service';
 import { TeamRole, MemberStatus } from '@prisma/client';
 import { NormalizedUser } from '../auth/interfaces/auth.interface';
 import { parseAcquisitionSnapshot } from '@app/laas-catalog';
 
-const ROLE_TEAM_ADMIN_ID = 2;   // Administrador de Equipo (ver TeamAdminService)
-const ROLE_OPERATOR_ID   = 4;   // Operario (default para miembros degradados)
 const MAX_REJECTIONS     = 3;
 
 @Injectable()
@@ -164,11 +162,15 @@ export class TeamsService {
       where: { teamId, userId: targetUserId },
     });
     if (!targetMember) throw new NotFoundException('Miembro no encontrado en el equipo');
+    // Las solicitudes pendientes/rechazadas pasan por approveMember (notificación, etc.)
+    if (targetMember.status !== MemberStatus.APPROVED) {
+      throw new BadRequestException('Primero aprueba la solicitud de este miembro');
+    }
 
     // 4. Actualizar TeamMember.role, propagar a UserProjectRole en los proyectos
     //    del equipo e invalidar la caché de permisos del usuario afectado
     await this.teamAdmin.setTeamRole(teamId, targetUserId, newRole);
-    const projectRoleId = newRole === 'ADMIN' ? ROLE_TEAM_ADMIN_ID : ROLE_OPERATOR_ID;
+    const projectRoleId = projectRoleIdFor(newRole);
 
     return {
       message: `Rol actualizado a ${newRole}`,
