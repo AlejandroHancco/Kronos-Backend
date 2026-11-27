@@ -23,7 +23,17 @@ export function readHidden(prompt: string): Promise<string> {
     stdin.setRawMode(true);
     stdin.resume();
     stdin.setEncoding('utf8');
+    const onExit = () => {
+      try {
+        stdin.setRawMode(false);
+      } catch {
+        /* ignore */
+      }
+    };
+    process.once('exit', onExit);
     const onData = (chunk: string) => {
+      // Escape sequences (arrows, Home, Delete, F-keys): ignore the whole chunk.
+      if (chunk.startsWith('')) return;
       for (const ch of chunk) {
         if (ch === '\u0003') {
           cleanup();
@@ -35,7 +45,7 @@ export function readHidden(prompt: string): Promise<string> {
           resolve(buf);
           return;
         } else if (ch === '\u007f' || ch === '\b') {
-          buf = buf.slice(0, -1);
+          buf = Array.from(buf).slice(0, -1).join('');
         } else if (ch >= ' ') {
           buf += ch;
         }
@@ -43,6 +53,7 @@ export function readHidden(prompt: string): Promise<string> {
     };
     const cleanup = () => {
       stdin.removeListener('data', onData);
+      process.removeListener('exit', onExit);
       stdin.setRawMode(false);
       stdin.pause();
     };

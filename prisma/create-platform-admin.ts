@@ -20,39 +20,40 @@ async function main() {
 
   const { prisma, pool } = createSeedClient();
   try {
-    const existing = await prisma.user.findUnique({
-      where: { email },
-      select: { uuid: true },
-    });
-    if (existing) {
-      const memberships = await prisma.teamMember.count({
-        where: { userId: existing.uuid },
-      });
-      if (memberships > 0) {
-        throw new Error(
-          'Ese usuario pertenece a un grupo (team_members). Quítalo del grupo primero.',
-        );
-      }
-    }
-
     const hash = await bcrypt.hash(password, 10);
-    await prisma.user.upsert({
-      where: { email },
-      create: {
-        email,
-        name: 'Superadministrador',
-        provider: 'password',
-        emailVerified: true,
-        isPlatformAdmin: true,
-        password: hash,
-      },
-      update: {
-        password: hash,
-        provider: 'password',
-        emailVerified: true,
-        isPlatformAdmin: true,
-        passwordChangedAt: new Date(),
-      },
+    await prisma.$transaction(async (tx) => {
+      const existing = await tx.user.findUnique({
+        where: { email },
+        select: { uuid: true },
+      });
+      if (existing) {
+        const memberships = await tx.teamMember.count({
+          where: { userId: existing.uuid },
+        });
+        if (memberships > 0) {
+          throw new Error(
+            'Ese usuario pertenece a un grupo (team_members). Quítalo del grupo primero.',
+          );
+        }
+      }
+      await tx.user.upsert({
+        where: { email },
+        create: {
+          email,
+          name: 'Superadministrador',
+          provider: 'password',
+          emailVerified: true,
+          isPlatformAdmin: true,
+          password: hash,
+        },
+        update: {
+          password: hash,
+          provider: 'password',
+          emailVerified: true,
+          isPlatformAdmin: true,
+          passwordChangedAt: new Date(),
+        },
+      });
     });
     console.log(`Superadministrador listo: ${email}`);
   } finally {
