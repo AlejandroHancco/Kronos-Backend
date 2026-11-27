@@ -8,11 +8,12 @@ import { PrismaService } from '@app/database';
 import { TeamScopeService } from '@app/common';
 import { PermissionsService } from '../permissions/permissions.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { TeamAdminService } from './team-admin.service';
 import { TeamRole, MemberStatus } from '@prisma/client';
 import { NormalizedUser } from '../auth/interfaces/auth.interface';
 import { parseAcquisitionSnapshot } from '@app/laas-catalog';
 
-const ROLE_TEAM_ADMIN_ID = 2;   // Administrador de Equipo
+const ROLE_TEAM_ADMIN_ID = 2;   // Administrador de Equipo (ver TeamAdminService)
 const ROLE_OPERATOR_ID   = 4;   // Operario (default para miembros degradados)
 const MAX_REJECTIONS     = 3;
 
@@ -23,6 +24,7 @@ export class TeamsService {
     private teamScope: TeamScopeService,
     private permissionsService: PermissionsService,
     private notificationsService: NotificationsService,
+    private teamAdmin: TeamAdminService,
   ) {}
 
   async joinTeam(code: string, user: NormalizedUser) {
@@ -163,18 +165,10 @@ export class TeamsService {
     });
     if (!targetMember) throw new NotFoundException('Miembro no encontrado en el equipo');
 
-    // 4. Actualizar TeamMember.role
-    await this.prisma.teamMember.update({
-      where: { id: targetMember.id },
-      data: { role: newRole },
-    });
-
-    // 5. Propagar el cambio a UserProjectRole en todos los proyectos del equipo
+    // 4. Actualizar TeamMember.role, propagar a UserProjectRole en los proyectos
+    //    del equipo e invalidar la caché de permisos del usuario afectado
+    await this.teamAdmin.setTeamRole(teamId, targetUserId, newRole);
     const projectRoleId = newRole === 'ADMIN' ? ROLE_TEAM_ADMIN_ID : ROLE_OPERATOR_ID;
-    await this.propagateRoleToProjects(teamId, targetUserId, projectRoleId);
-
-    // 6. Invalidar caché de permisos del usuario afectado inmediatamente
-    await this.permissionsService.invalidateUserCache(targetUserId);
 
     return {
       message: `Rol actualizado a ${newRole}`,
@@ -182,33 +176,6 @@ export class TeamsService {
       newTeamRole: newRole,
       newProjectRoleId: projectRoleId,
     };
-  }
-
-  private async propagateRoleToProjects(
-    teamId: string,
-    userId: string,
-    roleId: number,
-  ) {
-    const teamMemberIds = await this.prisma.teamMember.findMany({
-      where: { teamId, status: MemberStatus.APPROVED },
-      select: { userId: true },
-    });
-    const memberUserIds = teamMemberIds.map((m) => m.userId);
-
-    const teamProjects = await this.prisma.project.findMany({
-      where: { userProjectRoles: { some: { userId: { in: memberUserIds } } } },
-      select: { uuid: true },
-    });
-
-    await Promise.all(
-      teamProjects.map((p) =>
-        this.prisma.userProjectRole.upsert({
-          where: { userId_projectId: { userId, projectId: p.uuid } },
-          update: { roleId },
-          create: { userId, projectId: p.uuid, roleId },
-        }),
-      ),
-    );
   }
 
   async removeMember(teamId: string, userId: string, caller: NormalizedUser) {
