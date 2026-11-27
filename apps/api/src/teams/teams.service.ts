@@ -28,6 +28,9 @@ export class TeamsService {
   async joinTeam(code: string, user: NormalizedUser) {
     const dbUser = await this.prisma.user.findUnique({ where: { uuid: user.id } });
     if (dbUser?.banned) throw new ForbiddenException('Tu cuenta ha sido suspendida');
+    if (dbUser?.isPlatformAdmin) {
+      throw new ForbiddenException('El superadministrador no puede unirse a un grupo');
+    }
 
     // Los códigos se guardan en mayúsculas.
     const team = await this.prisma.team.findUnique({ where: { code: code.trim().toUpperCase() } });
@@ -38,6 +41,13 @@ export class TeamsService {
     });
 
     if (existing?.status === 'APPROVED') throw new BadRequestException('Ya eres miembro');
+
+    // Un usuario pertenece a un solo grupo: no puede pedir entrar en otro.
+    const otherMembership = await this.prisma.teamMember.findFirst({
+      where: { userId: user.id, status: 'APPROVED', teamId: { not: team.id } },
+      select: { id: true },
+    });
+    if (otherMembership) throw new BadRequestException('Ya perteneces a un grupo');
 
     if (existing) {
       await this.prisma.teamMember.update({
@@ -167,6 +177,7 @@ export class TeamsService {
     if (targetMember.status !== MemberStatus.APPROVED) {
       throw new BadRequestException('Primero aprueba la solicitud de este miembro');
     }
+    await this.assertNotPlatformAdmin(targetUserId);
 
     // 4. Actualizar TeamMember.role, propagar a UserProjectRole en los proyectos
     //    del equipo e invalidar la caché de permisos del usuario afectado
@@ -211,6 +222,7 @@ export class TeamsService {
       where: { userId, teamId: adminMember.teamId },
     });
     if (!memberToApprove) throw new NotFoundException('Solicitud no encontrada');
+    await this.assertNotPlatformAdmin(userId);
 
     const updated = await this.prisma.teamMember.update({
       where: { id: memberToApprove.id },
@@ -230,6 +242,17 @@ export class TeamsService {
         status: updated.status,
       },
     };
+  }
+
+  /** Defensa en profundidad: el superadministrador nunca recibe rol dentro de un grupo. */
+  private async assertNotPlatformAdmin(userId: string) {
+    const target = await this.prisma.user.findUnique({
+      where: { uuid: userId },
+      select: { isPlatformAdmin: true },
+    });
+    if (target?.isPlatformAdmin) {
+      throw new ForbiddenException('El superadministrador no puede tener rol en un grupo');
+    }
   }
 
   async rejectMember(teamId: string, userId: string, adminUser: NormalizedUser) {
