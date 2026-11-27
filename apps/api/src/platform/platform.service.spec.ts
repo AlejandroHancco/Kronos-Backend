@@ -92,6 +92,19 @@ describe('PlatformService', () => {
       });
     });
 
+    it('treats a unique violation on grant create (concurrent request) as already pending', async () => {
+      prisma.teamAdminGrant.create.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('Unique constraint failed', { code: 'P2002', clientVersion: 'x' }),
+      );
+      await expect(svc.addAdmin('t1', 'new@lab.pe', 'sa')).resolves.toEqual({ status: 'pending' });
+      expect(mail.send).toHaveBeenCalledTimes(1);
+    });
+
+    it('propagates other errors on grant create', async () => {
+      prisma.teamAdminGrant.create.mockRejectedValue(new Error('db down'));
+      await expect(svc.addAdmin('t1', 'new@lab.pe', 'sa')).rejects.toThrow('db down');
+    });
+
     it('returns pending_verification for an unverified account', async () => {
       prisma.user.findFirst.mockResolvedValue({ ...verifiedUser, emailVerified: false });
       await expect(svc.addAdmin('t1', 'maria@pucp.edu.pe', 'sa')).resolves.toEqual({

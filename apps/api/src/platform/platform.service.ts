@@ -198,7 +198,15 @@ export class PlatformService {
       status = 'admin';
     } else {
       const open = await this.prisma.teamAdminGrant.findFirst({ where: { email, teamId, ...OPEN_GRANT } });
-      if (!open) await this.prisma.teamAdminGrant.create({ data: { email, teamId, invitedById } });
+      if (!open) {
+        try {
+          await this.prisma.teamAdminGrant.create({ data: { email, teamId, invitedById } });
+        } catch (err) {
+          // Carrera con otra petición: el índice único parcial (una invitación abierta
+          // por email+grupo) ya la tiene → mismo resultado que el camino idempotente.
+          if (!(err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002')) throw err;
+        }
+      }
       status = user ? 'pending_verification' : 'pending';
     }
 

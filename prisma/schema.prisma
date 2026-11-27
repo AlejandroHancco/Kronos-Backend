@@ -350,6 +350,9 @@ model Team {
   @@schema("platform")
 }
 
+// Índice único PARCIAL (solo SQL; Prisma no puede expresarlo), en la migración
+// 20261128130000_open_grant_unique: como mucho una invitación abierta
+// (claimedAt IS NULL AND revokedAt IS NULL) por (email, teamId).
 model TeamAdminGrant {
   id          String    @id @default(uuid())
   email       String
