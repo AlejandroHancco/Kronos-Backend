@@ -1,6 +1,7 @@
 -- Creates (or updates) a research group and makes an already-registered user its admin,
 -- so others can join with the group's code and the admin can accept them.
 -- Idempotent: re-running it renames the group / re-grants ADMIN, it never duplicates rows.
+-- The code is stored upper-cased (the API looks codes up with toUpperCase()).
 --
 -- The admin must have signed up in the app first (the row in platform.users is created at
 -- the first login). On the data VM:
@@ -18,14 +19,14 @@ SELECT EXISTS (SELECT 1 FROM platform.users WHERE email = :'admin_email') AS adm
 BEGIN;
 
 INSERT INTO platform.teams (id, name, code, "createdAt")
-VALUES (gen_random_uuid()::text, :'team_name', :'team_code', now())
+VALUES (gen_random_uuid()::text, :'team_name', upper(:'team_code'), now())
 ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name;
 
 INSERT INTO platform.team_members (id, "userId", "teamId", role, status, "createdAt")
 SELECT gen_random_uuid()::text, u.uuid, t.id,
        'ADMIN'::platform."TeamRole", 'APPROVED'::platform."MemberStatus", now()
 FROM platform.users u, platform.teams t
-WHERE u.email = :'admin_email' AND t.code = :'team_code'
+WHERE u.email = :'admin_email' AND t.code = upper(:'team_code')
 ON CONFLICT ("userId", "teamId") DO UPDATE
   SET role = 'ADMIN'::platform."TeamRole", status = 'APPROVED'::platform."MemberStatus";
 
@@ -35,4 +36,4 @@ SELECT t.name AS team, t.code, u.email AS admin, m.role, m.status
 FROM platform.team_members m
 JOIN platform.teams t ON t.id = m."teamId"
 JOIN platform.users u ON u.uuid = m."userId"
-WHERE t.code = :'team_code' AND m.role = 'ADMIN';
+WHERE t.code = upper(:'team_code') AND m.role = 'ADMIN';
