@@ -1,7 +1,8 @@
 import { Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bull';
-import { DEVICE_OPS_QUEUE, MEASUREMENTS_QUEUE, SCHEDULED_MEASUREMENTS_QUEUE } from './queue.constants';
+import { DEVICE_OPS_QUEUE, MAIL_QUEUE, MEASUREMENTS_QUEUE, SCHEDULED_MEASUREMENTS_QUEUE } from './queue.constants';
 import { DeviceOpsClient } from './device-ops.client';
+import { MailOutbox } from './mail-outbox';
 
 /**
  * Configura Bull con Redis (REDIS_URL obligatorio, ej. Upstash: rediss://...).
@@ -20,9 +21,10 @@ import { DeviceOpsClient } from './device-ops.client';
       { name: MEASUREMENTS_QUEUE },
       { name: SCHEDULED_MEASUREMENTS_QUEUE },
       { name: DEVICE_OPS_QUEUE },
+      { name: MAIL_QUEUE },
     ),
   ],
-  providers: [DeviceOpsClient],
-  exports: [BullModule, DeviceOpsClient],
+  providers: [DeviceOpsClient, MailOutbox],
+  exports: [BullModule, DeviceOpsClient, MailOutbox],
 })
 export class QueueModule {}

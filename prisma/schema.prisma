@@ -409,7 +409,7 @@ enum MemberStatus {
 model ActivityEvent {
   id        Int      @id @default(autoincrement())
   teamId    String
-  type      String   @db.VarChar(50) // TEAM_APPROVED | TEAM_REJECTED | TEAM_JOIN_REQUEST | MEASUREMENT_COMPLETE | ...
+  type      String   @db.VarChar(50) // TEAM_APPROVED | TEAM_REJECTED | TEAM_JOIN_REQUEST | MEASUREMENT_COMPLETE | DEVICE_OFFLINE | DEVICE_ONLINE | ...
   title     String   @db.VarChar(150)
   message   String   @db.VarChar(500)
   data      Json?

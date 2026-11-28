@@ -19,6 +19,7 @@ import { MeasurementJobRunner } from './processors/measurement-job.runner';
 import { DeviceOpsProcessor } from './processors/device-ops.processor';
 import { DeviceHealthService } from './devices/device-health.service';
 import { DeviceReachability } from './devices/device-reachability';
+import { DeviceAlerts } from './devices/device-alerts';
 
 /**
  * Worker: el ejecutor LaaS, único proceso que habla con los dispositivos. Consume las colas Bull
@@ -50,6 +51,7 @@ import { DeviceReachability } from './devices/device-reachability';
     MeasurementProcessor,
     ScheduledMeasurementProcessor,
     DeviceHealthService,
+    DeviceAlerts,
     DeviceOpsProcessor,
   ],
 })

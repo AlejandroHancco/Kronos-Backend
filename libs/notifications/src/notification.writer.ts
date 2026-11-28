@@ -2,6 +2,17 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@app/database';
 import { RealtimePublisher } from '@app/realtime';
 
+/** "<equipo> se desconectó a las HH:MM. N mediciones programadas en la próxima hora." (campana y correo) */
+export function deviceOfflineMessage(deviceName: string, hhmm: string, atRisk: number): string {
+  const scheduled = atRisk === 1 ? '1 medición programada' : `${atRisk} mediciones programadas`;
+  return `${deviceName} se desconectó a las ${hhmm}. ${scheduled} en la próxima hora.`;
+}
+
+/** "<equipo> volvió a estar disponible (desconectado X min). Puntos perdidos: M." */
+export function deviceOnlineMessage(deviceName: string, downMinutes: number, lostPoints: number): string {
+  return `${deviceName} volvió a estar disponible (desconectado ${downMinutes} min). Puntos perdidos: ${lostPoints}.`;
+}
+
 @Injectable()
 export class NotificationWriter {
   constructor(
@@ -156,6 +167,42 @@ export class NotificationWriter {
       title: 'Error al medir',
       message,
       notifyUserIds: memberIds,
+    });
+  }
+
+  // ── Conexión de dispositivos (worker, health check) — destinatarios los decide quien llama ──
+
+  /** Un evento DEVICE_OFFLINE en el log de `teamId`, con campana para `userIds`. `hhmm`: hora local de la caída. */
+  async notifyDeviceOffline(
+    teamId: string,
+    userIds: string[],
+    device: { id: string; name: string },
+    atRisk: number,
+    hhmm: string,
+  ) {
+    await this.logEvent({
+      teamId,
+      type: 'DEVICE_OFFLINE',
+      title: 'Equipo desconectado',
+      message: deviceOfflineMessage(device.name, hhmm, atRisk),
+      notifyUserIds: userIds,
+    });
+  }
+
+  /** Un evento DEVICE_ONLINE en el log de `teamId`, con campana para `userIds`. */
+  async notifyDeviceOnline(
+    teamId: string,
+    userIds: string[],
+    device: { id: string; name: string },
+    downMinutes: number,
+    lostPoints: number,
+  ) {
+    await this.logEvent({
+      teamId,
+      type: 'DEVICE_ONLINE',
+      title: 'Equipo disponible',
+      message: deviceOnlineMessage(device.name, downMinutes, lostPoints),
+      notifyUserIds: userIds,
     });
   }
 }

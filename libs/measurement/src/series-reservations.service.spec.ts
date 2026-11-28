@@ -37,6 +37,7 @@ function setup(opts: {
   running?: JobRow[];
   prefs?: Array<{ taskId: number; sensorDeviceId: string; channelSelectorDeviceId: string | null }>;
   completed?: Array<{ startedAt: Date; finishedAt: Date }>;
+  missed?: Array<{ taskId: number; startAt: Date; missReason: string; projectId?: string }>;
   resolved?: any;
 } = {}) {
   const pending = opts.pending ?? [];
@@ -46,6 +47,15 @@ function setup(opts: {
       findMany: jest.fn(async (args: any) => {
         const w = args.where;
         if (w.status === 'completed') return opts.completed ?? [];
+        if (w.status === 'missed') {
+          return (opts.missed ?? []).filter(
+            (m) =>
+              m.missReason === w.missReason &&
+              (m.projectId ?? 'P1') === w.task.projectId &&
+              m.startAt >= w.startAt.gte &&
+              m.startAt <= w.startAt.lte,
+          );
+        }
         return (w.status === 'running' ? opts.running ?? [] : pending)
           .map((j) => ({ ...j, task: { projectId: 'P1', ...j.task } }))
           .filter(
@@ -328,5 +338,53 @@ describe('SeriesReservationsService.nextReservationForTask / reservationNearDevi
     expect(await service.reservationNearDevice('M', 'P1', at(7), 120)).toBeNull();
     expect(await service.reservationNearDevice('M', 'P1', at(21), 120)).toBeNull();
     expect(await service.reservationNearDevice('Z', 'P1', at(15), 120)).toBeNull();
+  });
+});
+
+describe('SeriesReservationsService.upcomingForDevice', () => {
+  it('ocurrencias pendientes y running del dispositivo cuya reserva toca [from, from + minutos)', async () => {
+    const { service } = setup({
+      // cada 30 min desde t0 (reserva 10 min): en [t0+5, t0+65) caen t0 (en curso), t0+30 y t0+60
+      pending: [job({ id: 10, taskId: 1 }), job({ id: 20, taskId: 2 })],
+      running: [job({ id: 30, taskId: 1, executionIndex: 1, repeatCount: 5 })],
+      prefs: [
+        { taskId: 1, sensorDeviceId: 'A', channelSelectorDeviceId: 'M' },
+        { taskId: 2, sensorDeviceId: 'B', channelSelectorDeviceId: null },
+      ],
+    });
+    // pending de la tarea 1: 3; su running (solo el punto 1, en curso): 1
+    expect(await service.upcomingForDevice('M', 'P1', at(5), 60)).toBe(4);
+    expect(await service.upcomingForDevice('B', 'P1', at(5), 60)).toBe(3);
+    expect(await service.upcomingForDevice('Z', 'P1', at(5), 60)).toBe(0);
+  });
+});
+
+describe('SeriesReservationsService.missedOfflineForDevice', () => {
+  it('cuenta los puntos missed por device_offline dentro de la caída, de tareas que usan el dispositivo', async () => {
+    const { service, prisma } = setup({
+      prefs: [
+        { taskId: 1, sensorDeviceId: 'A', channelSelectorDeviceId: 'M' },
+        { taskId: 2, sensorDeviceId: 'B', channelSelectorDeviceId: null },
+      ],
+      missed: [
+        { taskId: 1, startAt: at(10), missReason: 'device_offline' },
+        { taskId: 1, startAt: at(40), missReason: 'device_offline' },
+        { taskId: 1, startAt: at(41), missReason: 'device_busy' },
+        { taskId: 1, startAt: at(-5), missReason: 'device_offline' }, // antes de la caída
+        { taskId: 2, startAt: at(20), missReason: 'device_offline' }, // otro equipo
+      ],
+    });
+    expect(await service.missedOfflineForDevice('M', 'P1', at(0), at(60))).toBe(2);
+    expect(await service.missedOfflineForDevice('B', 'P1', at(0), at(60))).toBe(1);
+    expect(prisma.scheduledJob.findMany).toHaveBeenCalledWith({
+      where: { status: 'missed', missReason: 'device_offline', startAt: { gte: at(0), lte: at(60) }, task: { projectId: 'P1' } },
+      select: { taskId: true },
+    });
+  });
+
+  it('sin puntos perdidos no consulta preferencias', async () => {
+    const { service, prisma } = setup();
+    expect(await service.missedOfflineForDevice('M', 'P1', at(0), at(60))).toBe(0);
+    expect(prisma.taskPreference.findMany).not.toHaveBeenCalled();
   });
 });

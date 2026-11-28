@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException, Injectable } from '@nestjs/comm
 import { deviceIdsOf, PrefDevices, PrismaService } from '@app/database';
 import { ExperimentConfigService, toSweepRanges } from '@app/experiments';
 import { estimateSeconds } from './estimate';
-import { SeriesWindow, firstOverlap, nextReservationStart, reservationNear, reservationNearWindow, reservedSecondsFor, selfOverlaps, suggestStart } from './series';
+import { SeriesWindow, countOccurrencesOverlapping, firstOverlap, nextReservationStart, reservationNear, reservationNearWindow, reservedSecondsFor, selfOverlaps, suggestStart } from './series';
 
 /** Cadena pendiente (el job pendiente cubre executionIndex..executionIndex+repeatCount−1) con su reserva. */
 export type ReservedSeries = SeriesWindow & { jobId: number; taskId: number; taskName: string; label: string | null };
@@ -148,6 +148,41 @@ export class SeriesReservationsService {
   /** Inicio de una reserva del dispositivo en curso ahora o que empieza en ≤ `leadSeconds`; null si no hay. */
   async reservationNearDevice(deviceId: string, projectId: string, now: Date, leadSeconds: number): Promise<Date | null> {
     return reservationNear(await this.seriesForDevices([deviceId], [], projectId), now, leadSeconds);
+  }
+
+  /**
+   * Ocurrencias programadas (cadenas pendientes + filas running) del dispositivo cuya reserva toca
+   * [from, from + minutes): las mediciones en riesgo si el equipo está desconectado.
+   */
+  async upcomingForDevice(deviceId: string, projectId: string, from: Date, minutes: number): Promise<number> {
+    const to = new Date(from.getTime() + minutes * 60_000);
+    const [pending, running] = await Promise.all([
+      this.seriesForDevices([deviceId], [], projectId),
+      this.runningForDevices([deviceId], [], projectId),
+    ]);
+    return countOccurrencesOverlapping([...pending, ...running], from, to);
+  }
+
+  /**
+   * Puntos marcados 'missed' por 'device_offline' con inicio planificado en [from, to] y cuya tarea
+   * usa el dispositivo (según su preferencia más reciente, como el resto de reservas).
+   */
+  async missedOfflineForDevice(deviceId: string, projectId: string, from: Date, to: Date): Promise<number> {
+    const missed = await this.prisma.scheduledJob.findMany({
+      where: { status: 'missed', missReason: 'device_offline', startAt: { gte: from, lte: to }, task: { projectId } },
+      select: { taskId: true },
+    });
+    if (missed.length === 0) return 0;
+    const preferences = await this.prisma.taskPreference.findMany({
+      where: { taskId: { in: [...new Set(missed.map((m) => m.taskId))] } },
+      orderBy: { createdAt: 'desc' },
+      select: { taskId: true, sensorDeviceId: true, channelSelectorDeviceId: true },
+    });
+    const usesDevice = new Map<number, boolean>();
+    for (const p of preferences) {
+      if (!usesDevice.has(p.taskId)) usesDevice.set(p.taskId, deviceIdsOf(p).includes(deviceId));
+    }
+    return missed.filter((m) => usesDevice.get(m.taskId)).length;
   }
 
   /** Reserva (s) de una ejecución de la tarea con `channelCount` canales, con su configuración actual. */

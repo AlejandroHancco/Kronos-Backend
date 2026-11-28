@@ -5,7 +5,7 @@ import RedisMock from 'ioredis-mock';
 import { PrismaService } from '@app/database';
 import { REDIS_CLIENT } from '@app/redis';
 import { REALTIME_REDIS_CLIENT } from '@app/realtime';
-import { DEVICE_OPS_QUEUE, MEASUREMENTS_QUEUE } from '@app/queue';
+import { DEVICE_OPS_QUEUE, MAIL_QUEUE, MEASUREMENTS_QUEUE } from '@app/queue';
 import { AppModule } from './app.module';
 
 describe('api AppModule', () => {
@@ -36,6 +36,8 @@ describe('api AppModule', () => {
       .useValue(queueMock)
       .overrideProvider(getQueueToken(DEVICE_OPS_QUEUE))
       .useValue(queueMock)
+      .overrideProvider(getQueueToken(MAIL_QUEUE))
+      .useValue(queueMock)
       .compile();
   });
 
@@ -64,6 +66,7 @@ describe('api AppModule', () => {
       expect(names).not.toContain(forbidden);
     }
     // sanity: discovery does see the api providers
+    expect(names).toContain('MailQueueProcessor'); // the api sends the worker's queued mail
     expect(names).toContain('DevicesService');
     expect(names).toContain('LaasMetadataService');
     expect(names).toContain('LaasInstancesService');

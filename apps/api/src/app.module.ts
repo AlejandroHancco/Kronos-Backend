@@ -25,6 +25,7 @@ import { DevicePluginsModule } from './device-plugins/device-plugins.module';
 import { GatewayModule } from './gateway/gateway.module';
 import { LaasModule } from './laas/laas.module';
 import { PlatformModule } from './platform/platform.module';
+import { MailQueueModule } from './mail/mail-queue.module';
 import { RedisModule } from '@app/redis';
 import { RealtimeModule } from '@app/realtime';
 import { CommonModule } from '@app/common';
@@ -72,6 +73,8 @@ import { PrismaModule } from '@app/database';
     LaasModule,
     // Superadministrador: grupos de investigación y sus administradores (/platform)
     PlatformModule,
+    // Envía por Brevo los correos que el worker (sin internet) deja en la cola 'mail'
+    MailQueueModule,
   ],
   controllers: [AppController],
   providers: [

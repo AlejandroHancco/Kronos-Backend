@@ -1,21 +1,39 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
+import type Redis from 'ioredis';
 import { PrismaService } from '@app/database';
 import { LaasCatalog } from '@app/laas-catalog';
 import { RealtimePublisher } from '@app/realtime';
-import { RedisLockService } from '@app/redis';
+import { REDIS_CLIENT, RedisLockService } from '@app/redis';
 import { DeviceReachability } from './device-reachability';
+import { AlertDevice, DeviceAlerts } from './device-alerts';
 
 const CHECK_INTERVAL_MS = 30_000;
 const CONCURRENCY = 5;
 /** TTL del liderazgo; no se libera al terminar (el TTL cierra el turno del intervalo). */
 const LEADER_TTL_MS = 25_000;
+/** Fallos consecutivos para dar por desconectado un dispositivo online (~1 min con chequeos cada 30 s). */
+const FAILURES_TO_OFFLINE = 2;
+/** El contador caduca si deja de chequearse (p. ej. dispositivo archivado), para no arrastrar fallos viejos. */
+const FAIL_COUNTER_TTL_S = 3600;
+
+/** Fallos consecutivos de chequeo del dispositivo. */
+export const failKey = (deviceId: string) => `health:fail:${deviceId}`;
+/** Inicio (ISO) de la caída en curso; existe solo mientras el dispositivo está desconectado tras haber estado online. */
+export const downKey = (deviceId: string) => `health:down:${deviceId}`;
+
+type CheckedDevice = AlertDevice & { ip: string | null; type: string | null; status: string };
 
 /**
  * Chequea periódicamente si cada dispositivo está online según su driver, sin saturar la red
  * local ni el proceso: corre cada 30s solo en la réplica líder (lock Redis 'device-health'), con un
  * máximo de 5 chequeos en paralelo, y solo escribe en DB / emite por WebSocket cuando el estado
  * realmente cambia.
+ *
+ * Rebote: un dispositivo online pasa a offline solo tras 2 fallos seguidos (contador en Redis) y
+ * vuelve a online con 1 éxito. En cada caída (online → offline) avisa una vez a los equipos del
+ * proyecto y, al recuperarse, una vez más con la duración y los puntos perdidos (DeviceAlerts).
+ * Un fallo al avisar se registra y nunca corta el ciclo.
  */
 @Injectable()
 export class DeviceHealthService {
@@ -28,6 +46,8 @@ export class DeviceHealthService {
     private reachability: DeviceReachability,
     private realtime: RealtimePublisher,
     private lockService: RedisLockService,
+    @Inject(REDIS_CLIENT) private redis: Redis,
+    private alerts: DeviceAlerts,
   ) {}
 
   @Interval(CHECK_INTERVAL_MS)
@@ -54,7 +74,7 @@ export class DeviceHealthService {
         status: { not: 'archived' },
         OR: [{ ip: { not: null } }, { type: { in: addressless } }],
       },
-      select: { id: true, ip: true, type: true, status: true, projectId: true },
+      select: { id: true, name: true, ip: true, type: true, status: true, projectId: true },
     });
 
     for (let i = 0; i < devices.length; i += CONCURRENCY) {
@@ -63,31 +83,60 @@ export class DeviceHealthService {
     }
   }
 
-  private async checkOne(device: {
-    id: string;
-    ip: string | null;
-    type: string | null;
-    status: string;
-    projectId: string;
-  }) {
+  private async checkOne(device: CheckedDevice) {
     const reachable = await this.reachability.check(device.type ?? '', device.ip);
-    const newStatus = reachable ? 'online' : 'offline';
+    if (reachable) await this.onReachable(device);
+    else await this.onUnreachable(device);
+  }
 
-    if (newStatus === device.status) return;
+  private async onReachable(device: CheckedDevice) {
+    await this.redis.del(failKey(device.id));
+    if (device.status === 'online') return;
 
+    await this.setStatus(device, 'online');
+    const downIso = await this.redis.get(downKey(device.id));
+    if (!downIso) return; // no venía de una caída avisada (p. ej. dispositivo nuevo): nada que notificar
+    await this.redis.del(downKey(device.id));
+    await this.safely(`aviso de recuperación de ${device.id}`, () =>
+      this.alerts.deviceOnline(alertDevice(device), new Date(downIso), new Date()),
+    );
+  }
+
+  private async onUnreachable(device: CheckedDevice) {
+    const failures = await this.redis.incr(failKey(device.id));
+    await this.redis.expire(failKey(device.id), FAIL_COUNTER_TTL_S);
+    if (device.status === 'offline') return;
+    if (device.status === 'online' && failures < FAILURES_TO_OFFLINE) return;
+
+    await this.setStatus(device, 'offline');
+    // sin chequear → offline: nunca estuvo online, no es una caída
+    if (device.status !== 'online') return;
+    const at = new Date();
+    await this.safely(`aviso de desconexión de ${device.id}`, async () => {
+      await this.redis.set(downKey(device.id), at.toISOString());
+      await this.alerts.deviceOffline(alertDevice(device), at);
+    });
+  }
+
+  private async setStatus(device: CheckedDevice, status: 'online' | 'offline') {
     await this.prisma.device.update({
       where: { id: device.id },
-      data: { status: newStatus },
+      data: { status },
     });
 
     // Aislado: un fallo al emitir (p. ej. error de DB al resolver equipos) no debe saltar el resto del lote.
+    await this.safely(`device:status de ${device.id}`, () => this.realtime.deviceStatus(device.id, device.projectId, status));
+  }
+
+  private async safely(what: string, fn: () => Promise<unknown>): Promise<void> {
     try {
-      await this.realtime.deviceStatus(device.id, device.projectId, newStatus);
+      await fn();
     } catch (err) {
-      this.logger.error(
-        `No se pudo emitir device:status de ${device.id}`,
-        err instanceof Error ? err.stack : err,
-      );
+      this.logger.error(`No se pudo emitir ${what}`, err instanceof Error ? err.stack : err);
     }
   }
+}
+
+function alertDevice(d: CheckedDevice): AlertDevice {
+  return { id: d.id, name: d.name, projectId: d.projectId };
 }

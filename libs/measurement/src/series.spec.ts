@@ -1,6 +1,7 @@
 import {
   SCHEDULE_GRACE_SECONDS,
   SeriesWindow,
+  countOccurrencesOverlapping,
   firstOverlap,
   nextReservationStart,
   reservationNear,
@@ -114,6 +115,19 @@ describe('reservationNear', () => {
     expect(reservationNear([s], new Date(t0.getTime() + 62 * MIN), 120)).toEqual(new Date(t0.getTime() + 60 * MIN));
     expect(reservationNear([s], new Date(t0.getTime() + 45 * MIN), 120)).toBeNull();
     expect(reservationNear([s], new Date(t0.getTime() + 29 * MIN), 120)).toEqual(new Date(t0.getTime() + 30 * MIN));
+  });
+});
+
+describe('countOccurrencesOverlapping', () => {
+  it('cuenta las ocurrencias cuya reserva toca [from, to), incluida la que está en curso', () => {
+    const s = series({ reservedSeconds: 600 }); // t0, t0+30, t0+60, ... (10 ocurrencias)
+    // [t0+5, t0+65): t0 en curso, t0+30, t0+60
+    expect(countOccurrencesOverlapping([s], new Date(t0.getTime() + 5 * MIN), new Date(t0.getTime() + 65 * MIN))).toBe(3);
+    // [t0+10, t0+60): la de t0 ya terminó (semiabierto), la de t0+60 empieza en el borde superior
+    expect(countOccurrencesOverlapping([s], new Date(t0.getTime() + 10 * MIN), new Date(t0.getTime() + 60 * MIN))).toBe(1);
+    expect(countOccurrencesOverlapping([s, series({ intervalMinutes: null, lastIndex: 1 })], t0, new Date(t0.getTime() + 1))).toBe(2);
+    expect(countOccurrencesOverlapping([series({ firstIndex: 9, lastIndex: 10 })], t0, new Date(t0.getTime() + 600 * MIN))).toBe(2);
+    expect(countOccurrencesOverlapping([], t0, new Date(t0.getTime() + 60 * MIN))).toBe(0);
   });
 });
 

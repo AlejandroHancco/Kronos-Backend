@@ -5,7 +5,7 @@ import RedisMock from 'ioredis-mock';
 import { PrismaService } from '@app/database';
 import { REDIS_CLIENT } from '@app/redis';
 import { REALTIME_REDIS_CLIENT } from '@app/realtime';
-import { DEVICE_OPS_QUEUE, MEASUREMENTS_QUEUE, SCHEDULED_MEASUREMENTS_QUEUE } from '@app/queue';
+import { DEVICE_OPS_QUEUE, MAIL_QUEUE, MEASUREMENTS_QUEUE, SCHEDULED_MEASUREMENTS_QUEUE } from '@app/queue';
 import { DEVICE_DRIVERS, DEVICE_DRIVER_INSTANCES } from '@app/device-drivers';
 import { MeasurementExecutor } from '@app/measurement';
 import { WorkerModule } from './worker.module';
@@ -15,6 +15,7 @@ import { MeasurementProcessor, ScheduledMeasurementProcessor } from './processor
 import { MeasurementJobRunner } from './processors/measurement-job.runner';
 import { DeviceOpsProcessor } from './processors/device-ops.processor';
 import { DeviceHealthService } from './devices/device-health.service';
+import { DeviceAlerts } from './devices/device-alerts';
 import { DriverParityCheck } from './driver-parity.check';
 
 function build(drivers?: unknown[]) {
@@ -31,6 +32,8 @@ function build(drivers?: unknown[]) {
     .overrideProvider(getQueueToken(SCHEDULED_MEASUREMENTS_QUEUE))
     .useValue(queueMock)
     .overrideProvider(getQueueToken(DEVICE_OPS_QUEUE))
+    .useValue(queueMock)
+    .overrideProvider(getQueueToken(MAIL_QUEUE))
     .useValue(queueMock);
   if (drivers) builder = builder.overrideProvider(DEVICE_DRIVER_INSTANCES).useValue(drivers);
   return builder.compile();
@@ -51,7 +54,7 @@ describe('WorkerModule', () => {
   });
 
   it('provee el scheduler, los processors, el health check, el ejecutor de mediciones y el chequeo de paridad', () => {
-    for (const cls of [SchedulerService, MeasurementProcessor, ScheduledMeasurementProcessor, MeasurementJobRunner, DeviceHealthService, DeviceOpsProcessor, DriverParityCheck, MeasurementExecutor]) {
+    for (const cls of [SchedulerService, MeasurementProcessor, ScheduledMeasurementProcessor, MeasurementJobRunner, DeviceHealthService, DeviceAlerts, DeviceOpsProcessor, DriverParityCheck, MeasurementExecutor]) {
       expect(moduleRef.get(cls as any, { strict: false })).toBeInstanceOf(cls);
     }
   });
@@ -64,7 +67,9 @@ describe('WorkerModule', () => {
     expect(names).toContain('SchedulerService'); // discovery ve los providers reales
     expect(names).toContain('TeamScopeService'); // CommonModule (deviceStatus)
     expect(names).toContain('RealtimePublisher');
-    for (const forbidden of ['KronosGateway', 'MeasurementsGateway', 'MeasurementSchedulingService', 'DevicesService', 'DeviceConfigurationService']) {
+    // el worker no tiene internet: publica correos (MailOutbox), nunca los envía
+    expect(names).toContain('MailOutbox');
+    for (const forbidden of ['KronosGateway', 'MeasurementsGateway', 'MeasurementSchedulingService', 'DevicesService', 'DeviceConfigurationService', 'MailService', 'MailQueueProcessor']) {
       expect(names).not.toContain(forbidden);
     }
   });

@@ -47,3 +47,11 @@ export type DeviceOpName =
   | 'set-actuator-data';
 
 export type DeviceOpData = TestConnectionJob | ReadLiveConfigurationJob | ApplyLiveConfigurationJob | SetActuatorDataJob;
+
+/** Payload de los jobs de la cola 'mail' (correo saliente; sin `html` la API lo genera del texto). */
+export interface MailJob {
+  to: string;
+  subject: string;
+  text: string;
+  html?: string;
+}

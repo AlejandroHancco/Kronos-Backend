@@ -143,6 +143,21 @@ export function reservationNearWindow(
   return best === null ? null : { start: new Date(best.start), end: new Date(best.start + best.reserved) };
 }
 
+/**
+ * Nº de ocurrencias (entre todas las series) cuya reserva [inicio, inicio + reserva) toca
+ * [from, to): las que empiezan en el tramo y la que está en curso en `from`.
+ */
+export function countOccurrencesOverlapping(series: SeriesWindow[], from: Date, to: Date): number {
+  let total = 0;
+  for (const s of series) {
+    const n = normalize(s);
+    if (n.count === 0) continue;
+    const [lo, hi] = startsWithin(n, from.getTime() - n.reserved, to.getTime());
+    if (hi >= lo) total += hi - lo + 1;
+  }
+  return total;
+}
+
 /** HH:MM en hora local de Lima (para mensajes al usuario). */
 export function limaTime(date: Date): string {
   return new Intl.DateTimeFormat('es-PE', {
