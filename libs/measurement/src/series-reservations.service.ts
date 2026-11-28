@@ -39,7 +39,7 @@ const pendingChainSelect = {
   executionIndex: true,
   repeatCount: true,
   reservedSeconds: true,
-  task: { select: { name: true } },
+  task: { select: { name: true, projectId: true } },
 } as const;
 
 type PendingChainRow = {
@@ -93,12 +93,24 @@ export class SeriesReservationsService {
     return pref ? deviceIdsOf(pref) : [];
   }
 
-  /** Una entrada por cadena pendiente cuya tarea usa alguno de `deviceIds`. */
-  async seriesForDevices(deviceIds: string[], excludeJobIds: number[] = []): Promise<ReservedSeries[]> {
+  /** Proyecto de la tarea (null si no existe). Los dispositivos pertenecen a un único proyecto. */
+  async projectOfTask(taskId: number): Promise<string | null> {
+    const task = await this.prisma.task.findUnique({ where: { id: taskId }, select: { projectId: true } });
+    return task?.projectId ?? null;
+  }
+
+  /**
+   * Una entrada por cadena pendiente cuya tarea usa alguno de `deviceIds`. Con `projectId` solo
+   * cuenta las tareas de ese proyecto: los dispositivos son de un único proyecto, así que no se
+   * pierde ningún choque real y un 409 nunca nombra tareas de otro grupo.
+   */
+  async seriesForDevices(deviceIds: string[], excludeJobIds: number[] = [], projectId?: string): Promise<ReservedSeries[]> {
     if (deviceIds.length === 0) return [];
     const wanted = new Set(deviceIds);
-    const all = await this.pendingSeries(excludeJobIds);
-    return all.filter((s) => s.devices.some((d) => wanted.has(d))).map(({ devices: _d, ...s }) => s);
+    const all = await this.pendingSeries(excludeJobIds, projectId);
+    return all
+      .filter((s) => s.devices.some((d) => wanted.has(d)))
+      .map(({ devices: _d, projectId: _p, ...s }) => s);
   }
 
   /** Reserva (s) de una ejecución de la tarea con `channelCount` canales, con su configuración actual. */
@@ -120,15 +132,20 @@ export class SeriesReservationsService {
    * 400 si la serie se solapa consigo misma; 409 `{ message, conflicts, suggestedStartAt }` si alguna
    * ocurrencia se solapa con una cadena pendiente que comparte dispositivo.
    */
-  async assertNoConflict(candidate: SeriesWindow, deviceIds: string[], excludeJobIds: number[] = []): Promise<void> {
+  async assertNoConflict(
+    candidate: SeriesWindow,
+    deviceIds: string[],
+    excludeJobIds: number[] = [],
+    projectId?: string,
+  ): Promise<void> {
     assertNoSelfOverlap(candidate);
-    this.assertAgainst(candidate, await this.seriesForDevices(deviceIds, excludeJobIds));
+    this.assertAgainst(candidate, await this.seriesForDevices(deviceIds, excludeJobIds, projectId));
   }
 
   /**
    * Revalida las cadenas pendientes de la tarea con una nueva configuración (dispositivos y
-   * estimación por nº de canales) contra las cadenas de otras tareas. Lanza 400/409 como
-   * assertNoConflict; si todo cabe devuelve el nuevo reservedSeconds de cada cadena (sin guardarlo:
+   * estimación por nº de canales) contra las cadenas de otras tareas del mismo proyecto y entre sí
+   * (todas con su nueva reserva). Lanza 400/409 como assertNoConflict; si todo cabe devuelve el nuevo reservedSeconds de cada cadena (sin guardarlo:
    * ver applyReservedSeconds). Sin cadenas pendientes devuelve [] sin más consultas.
    */
   async revalidateTask(
@@ -143,14 +160,21 @@ export class SeriesReservationsService {
     });
     if (own.length === 0) return [];
     const durations = await this.recentDurations(taskId);
-    const others = await this.seriesForDevices(deviceIds, own.map((j) => j.id));
-    return own.map((j) => {
-      const reservedSeconds = reservedSecondsFor(estimateFor(j.channelNumbers.length), durations);
-      const candidate = { ...windowOf(j), reservedSeconds };
-      assertNoSelfOverlap(candidate);
-      this.assertAgainst(candidate, others);
-      return { jobId: j.id, reservedSeconds };
-    });
+    const others = await this.seriesForDevices(deviceIds, own.map((j) => j.id), own[0].task.projectId);
+    const candidates: ReservedSeries[] = own.map((j) => ({
+      jobId: j.id,
+      taskId: j.taskId,
+      taskName: j.task.name,
+      label: j.label,
+      ...windowOf(j),
+      reservedSeconds: reservedSecondsFor(estimateFor(j.channelNumbers.length), durations),
+    }));
+    for (const c of candidates) {
+      assertNoSelfOverlap(c);
+      // otras tareas + las demás cadenas de esta misma tarea, con su nueva reserva
+      this.assertAgainst(c, [...others, ...candidates.filter((o) => o.jobId !== c.jobId)]);
+    }
+    return candidates.map((c) => ({ jobId: c.jobId, reservedSeconds: c.reservedSeconds }));
   }
 
   /** Guarda reservedSeconds en las cadenas (solo si siguen pendientes). */
@@ -174,7 +198,8 @@ export class SeriesReservationsService {
       const devices = new Set(a.devices);
       for (let j = i + 1; j < all.length; j++) {
         const b = all[j];
-        if (!b.devices.some((d) => devices.has(d))) continue;
+        // solo comparten dispositivos tareas del mismo proyecto (ver seriesForDevices)
+        if (b.projectId !== a.projectId || !b.devices.some((d) => devices.has(d))) continue;
         const hit = firstOverlap(a, b);
         if (hit) {
           pairs.push({
@@ -216,9 +241,16 @@ export class SeriesReservationsService {
   }
 
   /** Cadenas pendientes con los dispositivos de su tarea (las tareas sin preferencia no ocupan nada). */
-  private async pendingSeries(excludeJobIds: number[]): Promise<Array<ReservedSeries & { devices: string[] }>> {
+  private async pendingSeries(
+    excludeJobIds: number[],
+    projectId?: string,
+  ): Promise<Array<ReservedSeries & { devices: string[]; projectId: string }>> {
     const jobs = await this.prisma.scheduledJob.findMany({
-      where: { status: 'pending', ...(excludeJobIds.length ? { id: { notIn: excludeJobIds } } : {}) },
+      where: {
+        status: 'pending',
+        ...(excludeJobIds.length ? { id: { notIn: excludeJobIds } } : {}),
+        ...(projectId ? { task: { projectId } } : {}),
+      },
       select: pendingChainSelect,
       orderBy: { startAt: 'asc' },
     });
@@ -230,7 +262,7 @@ export class SeriesReservationsService {
     });
     const prefByTask = new Map<number, PrefDevices>();
     for (const p of preferences) if (!prefByTask.has(p.taskId)) prefByTask.set(p.taskId, p);
-    const out: Array<ReservedSeries & { devices: string[] }> = [];
+    const out: Array<ReservedSeries & { devices: string[]; projectId: string }> = [];
     for (const j of jobs) {
       const pref = prefByTask.get(j.taskId);
       if (!pref) continue;
@@ -241,6 +273,7 @@ export class SeriesReservationsService {
         label: j.label,
         ...windowOf(j),
         devices: deviceIdsOf(pref),
+        projectId: j.task.projectId,
       });
     }
     return out;

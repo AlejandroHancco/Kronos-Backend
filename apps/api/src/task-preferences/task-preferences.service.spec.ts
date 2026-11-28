@@ -113,6 +113,26 @@ describe('TaskPreferencesService.updateTaskPreference (revalidación de series p
     expect(estimateFor(2)).toBe(8);
   });
 
+  it('sin cambios de dispositivos ni rangos (solo nombre / mismos valores): no revalida y se guarda', async () => {
+    const { service, prisma, reservations } = setup(stored());
+    reservations.revalidateTask.mockRejectedValue(new ConflictException({ message: 'choque preexistente', conflicts: [], suggestedStartAt: null }));
+    await service.updateTaskPreference(7, { name: 'renombrada' } as any, 'u1');
+    await service.updateTaskPreference(
+      7,
+      { name: 'x', sensorDeviceId: 'a', channelSelectorDeviceId: null, ranges: [{ order: 0, start: 1, stop: 2 }] } as any,
+      'u1',
+    );
+    expect(reservations.revalidateTask).not.toHaveBeenCalled();
+    expect(reservations.applyReservedSeconds).not.toHaveBeenCalled();
+    expect(prisma.taskPreference.update).toHaveBeenCalledTimes(2);
+  });
+
+  it('cambiar solo los rangos revalida', async () => {
+    const { service, reservations } = setup(stored());
+    await service.updateTaskPreference(7, { ranges: [{ order: 0, start: 1, stop: 2, points: 401 }] } as any, 'u1');
+    expect(reservations.revalidateTask).toHaveBeenCalledWith(7, ['a'], expect.any(Function));
+  });
+
   it('choque con otra serie: 409 y la preferencia no se guarda', async () => {
     const { service, prisma, reservations } = setup(stored());
     reservations.revalidateTask.mockRejectedValueOnce(new ConflictException({ message: 'choca', conflicts: [], suggestedStartAt: null }));

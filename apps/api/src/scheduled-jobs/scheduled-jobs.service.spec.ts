@@ -18,13 +18,14 @@ function setup() {
   ];
   const pending = [{
     id: 10, taskId: 1, label: 'Curado', seriesStartAt: t0, intervalMinutes: 30, executionIndex: 1, repeatCount: 10,
-    reservedSeconds: 600, channelNumbers: [1], task: { name: 'Losa' },
+    reservedSeconds: 600, channelNumbers: [1], task: { name: 'Losa', projectId: 'P1' },
   }];
   const prisma = {
     scheduledJob: {
       findMany: jest.fn(async (args: any) => (args.where.status === 'pending' ? pending : [])),
       create: jest.fn(async (args: any) => ({ id: 99, ...args.data })),
     },
+    task: { findUnique: jest.fn(async () => ({ projectId: 'P1' })) },
     taskPreference: {
       findFirst: jest.fn(async (args: any) => prefs.find((p) => p.taskId === args.where.taskId) ?? null),
       findMany: jest.fn(async (args: any) => prefs.filter((p) => args.where.taskId.in.includes(p.taskId))),
@@ -53,6 +54,9 @@ describe('ScheduledJobsService.create (admisión de series)', () => {
       suggestedStartAt: at(10).toISOString(),
     });
     expect(prisma.scheduledJob.create).not.toHaveBeenCalled();
+    expect(prisma.scheduledJob.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { status: 'pending', task: { projectId: 'P1' } } }),
+    );
   });
 
   it('acepta una serie en otro equipo a la misma hora', async () => {
@@ -89,13 +93,14 @@ describe('ScheduledJobsService.create (admisión de series)', () => {
 });
 
 describe('ScheduledJobsService.findConflicts', () => {
-  it('lista los choques preexistentes en los que participa una serie del equipo del usuario', async () => {
+  it('lista solo los choques preexistentes con ambas series en el equipo del usuario', async () => {
     const { service, prisma, reservations } = setup();
     jest.spyOn(reservations, 'findConflicts').mockResolvedValue([
       { a: { jobId: 10, taskName: 'Losa' }, b: { jobId: 20, taskName: 'Viga' }, at: at(0).toISOString() },
       { a: { jobId: 30, taskName: 'X' }, b: { jobId: 40, taskName: 'Y' }, at: at(0).toISOString() },
+      { a: { jobId: 10, taskName: 'Losa' }, b: { jobId: 40, taskName: 'Y' }, at: at(0).toISOString() },
     ]);
-    prisma.scheduledJob.findMany.mockResolvedValueOnce([{ id: 20 }] as any);
+    prisma.scheduledJob.findMany.mockResolvedValueOnce([{ id: 10 }, { id: 20 }] as any);
     expect(await service.findConflicts('u1')).toEqual([
       { a: { jobId: 10, taskName: 'Losa' }, b: { jobId: 20, taskName: 'Viga' }, at: at(0).toISOString() },
     ]);

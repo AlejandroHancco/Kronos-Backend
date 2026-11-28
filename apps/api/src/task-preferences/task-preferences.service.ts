@@ -13,6 +13,17 @@ import { UpdateTaskPreferenceDto } from './dto/update-task-preference.dto';
 const toValidationRanges = (ranges: TaskPreferenceRangeDto[]): SweepRange[] =>
   ranges.map((r) => ({ start: r.start, stop: r.stop, points: r.points ?? 801, scale: r.scale ?? 'LIN' }));
 
+type StoredRange = { order: number; start: Prisma.Decimal | number; stop: Prisma.Decimal | number; points: number; scale: string };
+
+/** ¿Los rangos del DTO equivalen a los guardados? (por `order`; puntos/escala con los defaults de la BD) */
+function sameRanges(next: TaskPreferenceRangeDto[], stored: StoredRange[]): boolean {
+  const key = (r: { order: number; start: number; stop: number; points: number; scale: string }) =>
+    [r.order, r.start, r.stop, r.points, r.scale].join('|');
+  const a = next.map((r) => key({ ...r, points: r.points ?? 801, scale: r.scale ?? 'LIN' })).sort();
+  const b = stored.map((r) => key({ ...r, start: Number(r.start), stop: Number(r.stop) })).sort();
+  return a.length === b.length && a.every((k, i) => k === b[i]);
+}
+
 export interface TaskPreferenceResponse {
   id: number;
   taskId: number;
@@ -144,7 +155,7 @@ export class TaskPreferencesService {
   ): Promise<TaskPreferenceSaveResponse> {
     await this.teamScope.assertTaskInTeam(userId, taskId);
 
-    let reservedUpdates: ReservedSecondsUpdate[];
+    let reservedUpdates: ReservedSecondsUpdate[] = [];
     {
       const current = await this.prisma.taskPreference.findUnique({
         where: { taskId },
@@ -163,12 +174,20 @@ export class TaskPreferencesService {
         channelSelectorDeviceId ?? null,
         ranges,
       );
-      // Series pendientes de la tarea: con los nuevos dispositivos y la nueva reserva no pueden pisar
-      // otras series (409 y no se guarda). Sin series pendientes no hace nada.
-      const devices = channelSelectorDeviceId ? [sensorDeviceId, channelSelectorDeviceId] : [sensorDeviceId];
-      reservedUpdates = await this.seriesReservations.revalidateTask(taskId, devices, (channelCount) =>
-        estimateSeconds(acquisition, ranges, channelCount, !!channelSelectorDeviceId),
-      );
+      // Series pendientes de la tarea: si cambian dispositivos o rangos (lo que define los equipos
+      // ocupados y la reserva; el MUX define además los canales), con la nueva configuración no
+      // pueden pisar otras series (409 y no se guarda). Un cambio solo de nombre no revalida: debe
+      // poder guardarse aunque la tarea ya esté en un choque preexistente.
+      const changed =
+        sensorDeviceId !== current.sensorDeviceId ||
+        (channelSelectorDeviceId ?? null) !== (current.channelSelectorDeviceId ?? null) ||
+        (dto.ranges !== undefined && !sameRanges(dto.ranges, current.ranges));
+      if (changed) {
+        const devices = channelSelectorDeviceId ? [sensorDeviceId, channelSelectorDeviceId] : [sensorDeviceId];
+        reservedUpdates = await this.seriesReservations.revalidateTask(taskId, devices, (channelCount) =>
+          estimateSeconds(acquisition, ranges, channelCount, !!channelSelectorDeviceId),
+        );
+      }
     }
 
     try {
@@ -198,7 +217,7 @@ export class TaskPreferencesService {
           },
         },
       });
-      await this.seriesReservations.applyReservedSeconds(reservedUpdates);
+      if (reservedUpdates.length) await this.seriesReservations.applyReservedSeconds(reservedUpdates);
 
       return { ...this.mapToResponse(preference), warnings: await this.scheduledJobWarnings(taskId, preference) };
     } catch (error: unknown) {

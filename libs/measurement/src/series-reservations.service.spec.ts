@@ -23,7 +23,7 @@ interface JobRow {
   repeatCount: number;
   reservedSeconds: number;
   channelNumbers: number[];
-  task: { name: string };
+  task: { name: string; projectId?: string };
 }
 
 const job = (over: Partial<JobRow>): JobRow => ({
@@ -45,14 +45,18 @@ function setup(opts: {
       findMany: jest.fn(async (args: any) => {
         const w = args.where;
         if (w.status === 'completed') return opts.completed ?? [];
-        return pending.filter(
-          (j) =>
-            (w.taskId === undefined || j.taskId === w.taskId) &&
-            !(w.id?.notIn ?? []).includes(j.id),
-        );
+        return pending
+          .map((j) => ({ ...j, task: { projectId: 'P1', ...j.task } }))
+          .filter(
+            (j) =>
+              (w.taskId === undefined || j.taskId === w.taskId) &&
+              (w.task?.projectId === undefined || j.task.projectId === w.task.projectId) &&
+              !(w.id?.notIn ?? []).includes(j.id),
+          );
       }),
       updateMany: jest.fn(async () => ({ count: 1 })),
     },
+    task: { findUnique: jest.fn(async (args: any) => (args.where.id === 404 ? null : { projectId: 'P1' })) },
     taskPreference: {
       findFirst: jest.fn(async (args: any) => prefs.find((p) => p.taskId === args.where.taskId) ?? null),
       findMany: jest.fn(async (args: any) => prefs.filter((p) => args.where.taskId.in.includes(p.taskId))),
@@ -96,6 +100,25 @@ describe('SeriesReservationsService.seriesForDevices', () => {
     expect(prisma.scheduledJob.findMany).toHaveBeenLastCalledWith(
       expect.objectContaining({ where: { status: 'pending', id: { notIn: [10] } } }),
     );
+  });
+
+  it('con projectId solo cuenta tareas de ese proyecto', async () => {
+    const { service, prisma } = setup({
+      pending: [job({ id: 10, taskId: 1 }), job({ id: 20, taskId: 2, task: { name: 'Ajena', projectId: 'P2' } })],
+      prefs: [
+        { taskId: 1, sensorDeviceId: 'A', channelSelectorDeviceId: null },
+        { taskId: 2, sensorDeviceId: 'A', channelSelectorDeviceId: null },
+      ],
+    });
+    expect((await service.seriesForDevices(['A'], [], 'P1')).map((s) => s.jobId)).toEqual([10]);
+    expect(prisma.scheduledJob.findMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({ where: { status: 'pending', task: { projectId: 'P1' } } }),
+    );
+    await expect(
+      service.assertNoConflict({ seriesStartAt: t0, intervalMinutes: null, firstIndex: 1, lastIndex: 1, reservedSeconds: 600 }, ['A'], [10], 'P1'),
+    ).resolves.toBeUndefined();
+    expect(await service.projectOfTask(1)).toBe('P1');
+    expect(await service.projectOfTask(404)).toBeNull();
   });
 
   it('sin dispositivos: [] sin consultar', async () => {
@@ -192,7 +215,7 @@ describe('SeriesReservationsService.revalidateTask', () => {
   });
 
   it('sin choque: devuelve el nuevo reservedSeconds por cadena (excluye las cadenas propias)', async () => {
-    const pending = [job({ id: 10, taskId: 1, channelNumbers: [1, 2] }), job({ id: 11, taskId: 1, executionIndex: 2, repeatCount: 1 }), job({ id: 20, taskId: 2 })];
+    const pending = [job({ id: 10, taskId: 1, channelNumbers: [1, 2] }), job({ id: 11, taskId: 1, executionIndex: 2, repeatCount: 1, seriesStartAt: at(15) }), job({ id: 20, taskId: 2 })];
     const { service } = setup({ pending, prefs });
     const estimateFor = jest.fn((n: number) => n * 100);
     expect(await service.revalidateTask(1, ['A'], estimateFor)).toEqual([
@@ -200,6 +223,23 @@ describe('SeriesReservationsService.revalidateTask', () => {
       { jobId: 11, reservedSeconds: 160 },
     ]);
     expect(estimateFor).toHaveBeenCalledWith(2);
+  });
+
+  it('las cadenas propias se comprueban entre sí con la nueva reserva: 409', async () => {
+    // 10: cada 30 min desde t0; 11: única a t0+40 → con 600 s no chocan, con 1200 s sí (t0+30..t0+50)
+    const pending = [
+      job({ id: 10, taskId: 1, task: { name: 'Losa' } }),
+      job({ id: 11, taskId: 1, intervalMinutes: null, repeatCount: 1, seriesStartAt: at(40), label: 'Extra', task: { name: 'Losa' } }),
+    ];
+    const { service } = setup({ pending, prefs });
+    await expect(service.revalidateTask(1, ['A'], () => 400)).resolves.toHaveLength(2); // reserva 480 s
+    const err = await service.revalidateTask(1, ['A'], () => 1000).catch((e) => e); // reserva 1200 s
+    expect(err).toBeInstanceOf(ConflictException);
+    expect(err.getResponse()).toEqual({
+      message: 'La serie choca con otra medición programada en el mismo equipo',
+      conflicts: [{ jobId: 11, taskName: 'Losa', label: 'Extra', at: at(40).toISOString() }],
+      suggestedStartAt: expect.any(String),
+    });
   });
 
   it('reserva nueva mayor que el intervalo: 400', async () => {
@@ -222,11 +262,13 @@ describe('SeriesReservationsService.findConflicts', () => {
       job({ id: 20, taskId: 2, seriesStartAt: at(5), task: { name: 'T2' } }),
       job({ id: 30, taskId: 3, task: { name: 'T3' } }), // mismo instante, otro equipo
       job({ id: 40, taskId: 1, seriesStartAt: at(15), task: { name: 'T1' } }), // mismo equipo, sin solape
+      job({ id: 50, taskId: 4, task: { name: 'Otro grupo', projectId: 'P2' } }), // mismo MUX id, otro proyecto
     ];
     const prefs = [
       { taskId: 1, sensorDeviceId: 'A', channelSelectorDeviceId: 'M' },
       { taskId: 2, sensorDeviceId: 'B', channelSelectorDeviceId: 'M' },
       { taskId: 3, sensorDeviceId: 'C', channelSelectorDeviceId: null },
+      { taskId: 4, sensorDeviceId: 'D', channelSelectorDeviceId: 'M' },
     ];
     const { service } = setup({ pending, prefs });
     expect(await service.findConflicts()).toEqual([

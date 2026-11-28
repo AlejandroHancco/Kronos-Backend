@@ -32,6 +32,8 @@ export class ScheduledJobsService {
         reservedSeconds,
       },
       await this.reservations.devicesOfTask(taskId),
+      [],
+      (await this.reservations.projectOfTask(taskId)) ?? undefined,
     );
 
     return this.prisma.scheduledJob.create({
@@ -66,7 +68,7 @@ export class ScheduledJobsService {
     });
   }
 
-  /** Choques preexistentes en los que participa al menos una serie pendiente del equipo del usuario. */
+  /** Choques preexistentes entre series pendientes que pertenecen ambas al equipo del usuario. */
   async findConflicts(userId: string): Promise<SeriesConflictPair[]> {
     const teamWhere = await this.teamScope.projectWhereForUser(userId);
     const [pairs, mine] = await Promise.all([
@@ -77,7 +79,7 @@ export class ScheduledJobsService {
       }),
     ]);
     const ids = new Set(mine.map((j) => j.id));
-    return pairs.filter((p) => ids.has(p.a.jobId) || ids.has(p.b.jobId));
+    return pairs.filter((p) => ids.has(p.a.jobId) && ids.has(p.b.jobId));
   }
 
   async findOne(id: number, userId: string) {
