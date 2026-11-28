@@ -612,3 +612,13 @@ describe('SchedulerService', () => {
     });
   });
 });
+
+describe('SchedulerService: cola de los puntos programados', () => {
+  it("publica y consulta (reaper) en 'scheduled-measurements', no en la cola de manuales", () => {
+    const { getQueueToken } = jest.requireActual('@nestjs/bull');
+    const { MEASUREMENTS_QUEUE, SCHEDULED_MEASUREMENTS_QUEUE } = jest.requireActual('@app/queue');
+    const tokens = (Reflect.getMetadata('self:paramtypes', SchedulerService) ?? []).map((p: any) => p.param);
+    expect(tokens).toContain(getQueueToken(SCHEDULED_MEASUREMENTS_QUEUE));
+    expect(tokens).not.toContain(getQueueToken(MEASUREMENTS_QUEUE));
+  });
+});

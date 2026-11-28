@@ -4,7 +4,9 @@ import RedisMock from 'ioredis-mock';
 import type Redis from 'ioredis';
 import { DeviceBusyTimeoutError, DeviceStateService, RedisLockService } from '@app/redis';
 import type { MeasurementJobData } from '@app/queue';
-import { MeasurementProcessor } from './measurement.processor';
+import { MEASUREMENTS_QUEUE, SCHEDULED_MEASUREMENTS_QUEUE } from '@app/queue';
+import { MeasurementProcessor, ScheduledMeasurementProcessor } from './measurement.processor';
+import { MeasurementJobRunner } from './measurement-job.runner';
 
 const makeJob = (over: Partial<MeasurementJobData> = {}) =>
   ({
@@ -52,7 +54,7 @@ function setup(preference: unknown, lockService: any, opts: ScheduledOpts = {}) 
     seriesForDevices: jest.fn(async () => opts.series ?? []),
     runningForDevices: jest.fn(async () => opts.running ?? []),
   };
-  const processor = new MeasurementProcessor(
+  const processor = new MeasurementJobRunner(
     executor as any,
     realtime as any,
     prisma as any,
@@ -184,10 +186,27 @@ describe('MeasurementProcessor.handleExecute', () => {
   });
 });
 
-describe('MeasurementProcessor: concurrencia', () => {
-  it("@Process({ name: 'execute', concurrency: 4 })", () => {
-    const meta = Reflect.getMetadata('bull:module_queue_process', MeasurementProcessor.prototype.handleExecute);
-    expect(meta).toEqual({ name: 'execute', concurrency: 4 });
+describe('Processors de medición: colas y concurrencia', () => {
+  it.each([
+    [MeasurementProcessor, MEASUREMENTS_QUEUE],
+    [ScheduledMeasurementProcessor, SCHEDULED_MEASUREMENTS_QUEUE],
+  ] as const)("%p consume su cola con @Process({ name: 'execute', concurrency: 4 })", (cls, queue) => {
+    expect(Reflect.getMetadata('bull:module_queue', cls)).toEqual({ name: queue });
+    expect(Reflect.getMetadata('bull:module_queue_process', cls.prototype.handleExecute)).toEqual({
+      name: 'execute',
+      concurrency: 4,
+    });
+  });
+
+  it.each([MeasurementProcessor, ScheduledMeasurementProcessor])('%p delega en el mismo MeasurementJobRunner', async (cls) => {
+    const runner = { handleExecute: jest.fn(async () => 'r'), onFailed: jest.fn(async () => undefined) };
+    const p = new cls(runner as any);
+    const job = makeJob();
+    const err = new Error('e');
+    await expect(p.handleExecute(job)).resolves.toBe('r');
+    await p.onFailed(job, err);
+    expect(runner.handleExecute).toHaveBeenCalledWith(job);
+    expect(runner.onFailed).toHaveBeenCalledWith(job, err);
   });
 });
 
@@ -203,6 +222,7 @@ describe('MeasurementProcessor: jobs programados (ventana y hueco)', () => {
     startAt: NOW,
     seriesStartAt: NOW,
     toleranceMinutes: 5,
+    startedAt: null,
     ...over,
   });
   const scheduledJob = (over: Partial<MeasurementJobData> = {}, attemptsMade = 0) => {
@@ -255,7 +275,7 @@ describe('MeasurementProcessor: jobs programados (ventana y hueco)', () => {
     const result = await ctx.processor.handleExecute(scheduledJob());
     expect(result).toEqual({ ok: true });
     expect(condUpdates(ctx.prisma)).toEqual([
-      { where: { id: 9, status: 'running' }, data: { startedAt: at(90_400), delaySeconds: 90 } },
+      { where: { id: 9, status: 'running', startedAt: null }, data: { startedAt: at(90_400), delaySeconds: 90 } },
       { where: { id: 9, status: 'running' }, data: { status: 'completed', finishedAt: at(150_000) } },
     ]);
     expect(ctx.prisma.scheduledJob.update).not.toHaveBeenCalled();
@@ -369,11 +389,47 @@ describe('MeasurementProcessor: jobs programados (ventana y hueco)', () => {
     expect(ctx.executor.measureTask).toHaveBeenCalledTimes(1);
   });
 
-  it('la fila ya no está running (p. ej. el reaper la marcó missed): no mide', async () => {
+  it('la fila ya no está running (p. ej. el reaper la marcó missed): no mide y cierra el estado del cliente', async () => {
     const lockService = passLock();
     const ctx = setup(pref, lockService, { row: row({ status: 'missed' }) });
     await expect(ctx.processor.handleExecute(scheduledJob())).resolves.toBeNull();
     expect(ctx.executor.measureTask).not.toHaveBeenCalled();
+    expect(ctx.scheduler.markMissed).not.toHaveBeenCalled();
+    expect(ctx.realtime.jobStatus.mock.calls.map(([, s]: any[]) => s.status)).toEqual(['processing', 'failed']);
+  });
+
+  it('la fila deja de estar running mientras esperaba el lock: no mide, cierra el estado del cliente', async () => {
+    const ctx = setup(pref, passLock(), { row: row() });
+    ctx.prisma.scheduledJob.findUnique.mockResolvedValueOnce(row()).mockResolvedValueOnce(row({ status: 'missed' }));
+    await expect(ctx.processor.handleExecute(scheduledJob())).resolves.toBeNull();
+    expect(ctx.executor.measureTask).not.toHaveBeenCalled();
+    expect(condUpdates(ctx.prisma)).toEqual([]);
+    expect(ctx.realtime.jobStatus.mock.calls.map(([, s]: any[]) => s.status)).toEqual(['processing', 'failed']);
+  });
+
+  it('reintento de un punto que ya empezó: conserva startedAt/delaySeconds y solo escribe completed', async () => {
+    jest.setSystemTime(at(3 * MIN));
+    const ctx = setup(pref, passLock(), { row: row({ startedAt: at(5000) }) });
+    await ctx.processor.handleExecute(scheduledJob({}, 1));
+    expect(ctx.executor.measureTask).toHaveBeenCalledTimes(1);
+    expect(condUpdates(ctx.prisma)).toEqual([
+      { where: { id: 9, status: 'running' }, data: { status: 'completed', finishedAt: at(3 * MIN) } },
+    ]);
+  });
+
+  it('reintento fuera de la ventana de un punto que ya empezó: failed (condicional a running), no missed', async () => {
+    jest.setSystemTime(new Date(WINDOW_END + 1));
+    const ctx = setup(pref, passLock(), { row: row({ startedAt: at(5000) }) });
+    await expect(ctx.processor.handleExecute(scheduledJob({}, 1))).resolves.toBeNull();
+    expect(ctx.scheduler.markMissed).not.toHaveBeenCalled();
+    expect(condUpdates(ctx.prisma)).toEqual([{ where: { id: 9, status: 'running' }, data: { status: 'failed' } }]);
+    expect(ctx.executor.measureTask).not.toHaveBeenCalled();
+  });
+
+  it('un DeviceBusyTimeoutError lanzado por la medición (con el lock tomado) se propaga, no es missed', async () => {
+    const ctx = setup(pref, passLock(), { row: row() });
+    ctx.executor.measureTask.mockRejectedValueOnce(new DeviceBusyTimeoutError(['X'], 10));
+    await expect(ctx.processor.handleExecute(scheduledJob())).rejects.toBeInstanceOf(DeviceBusyTimeoutError);
     expect(ctx.scheduler.markMissed).not.toHaveBeenCalled();
   });
 

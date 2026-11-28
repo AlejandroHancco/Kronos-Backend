@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bull';
-import { DEVICE_OPS_QUEUE, MEASUREMENTS_QUEUE } from './queue.constants';
+import { DEVICE_OPS_QUEUE, MEASUREMENTS_QUEUE, SCHEDULED_MEASUREMENTS_QUEUE } from './queue.constants';
 import { DeviceOpsClient } from './device-ops.client';
 
 /**
@@ -16,7 +16,11 @@ import { DeviceOpsClient } from './device-ops.client';
         return { url };
       },
     }),
-    BullModule.registerQueue({ name: MEASUREMENTS_QUEUE }, { name: DEVICE_OPS_QUEUE }),
+    BullModule.registerQueue(
+      { name: MEASUREMENTS_QUEUE },
+      { name: SCHEDULED_MEASUREMENTS_QUEUE },
+      { name: DEVICE_OPS_QUEUE },
+    ),
   ],
   providers: [DeviceOpsClient],
   exports: [BullModule, DeviceOpsClient],

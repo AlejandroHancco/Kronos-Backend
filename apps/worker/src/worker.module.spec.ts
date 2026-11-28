@@ -5,13 +5,14 @@ import RedisMock from 'ioredis-mock';
 import { PrismaService } from '@app/database';
 import { REDIS_CLIENT } from '@app/redis';
 import { REALTIME_REDIS_CLIENT } from '@app/realtime';
-import { DEVICE_OPS_QUEUE, MEASUREMENTS_QUEUE } from '@app/queue';
+import { DEVICE_OPS_QUEUE, MEASUREMENTS_QUEUE, SCHEDULED_MEASUREMENTS_QUEUE } from '@app/queue';
 import { DEVICE_DRIVERS, DEVICE_DRIVER_INSTANCES } from '@app/device-drivers';
 import { MeasurementExecutor } from '@app/measurement';
 import { WorkerModule } from './worker.module';
 import { HealthController } from './health.controller';
 import { SchedulerService } from './scheduler/scheduler.service';
-import { MeasurementProcessor } from './processors/measurement.processor';
+import { MeasurementProcessor, ScheduledMeasurementProcessor } from './processors/measurement.processor';
+import { MeasurementJobRunner } from './processors/measurement-job.runner';
 import { DeviceOpsProcessor } from './processors/device-ops.processor';
 import { DeviceHealthService } from './devices/device-health.service';
 import { DriverParityCheck } from './driver-parity.check';
@@ -26,6 +27,8 @@ function build(drivers?: unknown[]) {
     .overrideProvider(REALTIME_REDIS_CLIENT)
     .useValue(new RedisMock())
     .overrideProvider(getQueueToken(MEASUREMENTS_QUEUE))
+    .useValue(queueMock)
+    .overrideProvider(getQueueToken(SCHEDULED_MEASUREMENTS_QUEUE))
     .useValue(queueMock)
     .overrideProvider(getQueueToken(DEVICE_OPS_QUEUE))
     .useValue(queueMock);
@@ -48,7 +51,7 @@ describe('WorkerModule', () => {
   });
 
   it('provee el scheduler, los processors, el health check, el ejecutor de mediciones y el chequeo de paridad', () => {
-    for (const cls of [SchedulerService, MeasurementProcessor, DeviceHealthService, DeviceOpsProcessor, DriverParityCheck, MeasurementExecutor]) {
+    for (const cls of [SchedulerService, MeasurementProcessor, ScheduledMeasurementProcessor, MeasurementJobRunner, DeviceHealthService, DeviceOpsProcessor, DriverParityCheck, MeasurementExecutor]) {
       expect(moduleRef.get(cls as any, { strict: false })).toBeInstanceOf(cls);
     }
   });

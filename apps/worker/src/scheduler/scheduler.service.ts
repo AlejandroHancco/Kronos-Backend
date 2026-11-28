@@ -16,7 +16,7 @@ import {
 } from '@app/measurement';
 import { RealtimePublisher } from '@app/realtime';
 import { RedisLockService } from '@app/redis';
-import { MEASUREMENTS_QUEUE, MeasurementJobData, PRIORITY_SCHEDULED } from '@app/queue';
+import { MeasurementJobData, PRIORITY_SCHEDULED, SCHEDULED_MEASUREMENTS_QUEUE } from '@app/queue';
 
 /** Cada cuánto corre el tick. */
 const TICK_MS = 10_000;
@@ -55,7 +55,8 @@ type Estimate = { resolved: ResolvedExperiment; ranges: SweepRange[]; estimatedS
  * Despacha los ScheduledJobs con rejilla fija. Corre cada 10 s, solo en la réplica que obtiene el
  * liderazgo (lock Redis 'scheduler'):
  *  - Un pending a ≤ 30 s de su startAt con los dispositivos libres y online se marca 'running' y se
- *    publica como job Bull diferido (delay = startAt − now, jobId `scheduled-<id>`), para que empiece
+ *    publica como job Bull diferido en la cola 'scheduled-measurements' (delay = startAt − now, jobId
+ *    `scheduled-<id>`), para que empiece
  *    puntual y no al siguiente tick.
  *  - Vencido y no despachable (dispositivo ocupado u offline): espera mientras siga dentro de su
  *    ventana (startAt + tolerancia + 30 s) y la próxima reserva de sus dispositivos le deje terminar;
@@ -79,7 +80,7 @@ export class SchedulerService {
     private experimentConfig: ExperimentConfigService,
     private realtime: RealtimePublisher,
     private lockService: RedisLockService,
-    @InjectQueue(MEASUREMENTS_QUEUE)
+    @InjectQueue(SCHEDULED_MEASUREMENTS_QUEUE)
     private measurementQueue: Queue<MeasurementJobData>,
     private reservations: SeriesReservationsService,
   ) {}

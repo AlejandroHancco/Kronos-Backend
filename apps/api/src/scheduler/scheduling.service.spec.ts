@@ -173,3 +173,13 @@ describe('MeasurementSchedulingService.requestMeasurement (id del job correlacio
     expect(opts.jobId).toBe(res.jobId);
   });
 });
+
+describe('MeasurementSchedulingService: cola de las mediciones manuales', () => {
+  it("publica en 'measurements', nunca en la cola de programados", () => {
+    const { getQueueToken } = jest.requireActual('@nestjs/bull');
+    const { MEASUREMENTS_QUEUE, SCHEDULED_MEASUREMENTS_QUEUE } = jest.requireActual('@app/queue');
+    const tokens = (Reflect.getMetadata('self:paramtypes', MeasurementSchedulingService) ?? []).map((p: any) => p.param);
+    expect(tokens).toContain(getQueueToken(MEASUREMENTS_QUEUE));
+    expect(tokens).not.toContain(getQueueToken(SCHEDULED_MEASUREMENTS_QUEUE));
+  });
+});

@@ -14,7 +14,8 @@ import { MeasurementModule } from '@app/measurement';
 import { HealthController } from './health.controller';
 import { DriverParityCheck } from './driver-parity.check';
 import { SchedulerService } from './scheduler/scheduler.service';
-import { MeasurementProcessor } from './processors/measurement.processor';
+import { MeasurementProcessor, ScheduledMeasurementProcessor } from './processors/measurement.processor';
+import { MeasurementJobRunner } from './processors/measurement-job.runner';
 import { DeviceOpsProcessor } from './processors/device-ops.processor';
 import { DeviceHealthService } from './devices/device-health.service';
 import { DeviceReachability } from './devices/device-reachability';
@@ -45,7 +46,9 @@ import { DeviceReachability } from './devices/device-reachability';
     DriverParityCheck,
     DeviceReachability,
     SchedulerService,
+    MeasurementJobRunner,
     MeasurementProcessor,
+    ScheduledMeasurementProcessor,
     DeviceHealthService,
     DeviceOpsProcessor,
   ],
