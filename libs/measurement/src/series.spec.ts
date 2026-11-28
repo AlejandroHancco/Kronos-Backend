@@ -2,6 +2,7 @@ import {
   SeriesWindow,
   firstOverlap,
   nextReservationStart,
+  reservationNear,
   occurrenceStart,
   reservedSecondsFor,
   selfOverlaps,
@@ -94,6 +95,23 @@ describe('nextReservationStart', () => {
     expect(nextReservationStart([a, b], new Date(t0.getTime() + 90 * MIN))).toEqual(new Date(t0.getTime() + 120 * MIN));
     expect(nextReservationStart([a, b], new Date(t0.getTime() + 120 * MIN))).toBeNull();
     expect(nextReservationStart([], t0)).toBeNull();
+  });
+});
+
+describe('reservationNear', () => {
+  const ten = series({ intervalMinutes: null, firstIndex: 1, lastIndex: 1, reservedSeconds: 600 }); // [t0, t0+10min)
+  it('devuelve el inicio de una ocurrencia en curso o que empieza dentro del margen', () => {
+    expect(reservationNear([ten], new Date(t0.getTime() + 5 * MIN), 120)).toEqual(t0); // en curso
+    expect(reservationNear([ten], new Date(t0.getTime() - 2 * MIN), 120)).toEqual(t0); // empieza justo en 2 min
+    expect(reservationNear([ten], new Date(t0.getTime() - 3 * MIN), 120)).toBeNull();
+    expect(reservationNear([ten], new Date(t0.getTime() + 10 * MIN), 120)).toBeNull(); // ya terminó
+    expect(reservationNear([], t0, 120)).toBeNull();
+  });
+  it('en una serie periódica encuentra la ocurrencia correcta', () => {
+    const s = series({ reservedSeconds: 600 }); // cada 30 min desde t0
+    expect(reservationNear([s], new Date(t0.getTime() + 62 * MIN), 120)).toEqual(new Date(t0.getTime() + 60 * MIN));
+    expect(reservationNear([s], new Date(t0.getTime() + 45 * MIN), 120)).toBeNull();
+    expect(reservationNear([s], new Date(t0.getTime() + 29 * MIN), 120)).toEqual(new Date(t0.getTime() + 30 * MIN));
   });
 });
 

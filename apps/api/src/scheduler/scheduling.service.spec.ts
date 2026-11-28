@@ -9,7 +9,7 @@ const hiokiAcq = {
   secondsPerPoint: 0.01,
 };
 
-function setup(opts: { resolved?: any; resolveError?: unknown } = {}) {
+function setup(opts: { resolved?: any; resolveError?: unknown; nextReservation?: Date } = {}) {
   const prisma = {
     taskPreference: { findFirst: jest.fn(async () => null) },
   };
@@ -21,13 +21,15 @@ function setup(opts: { resolved?: any; resolveError?: unknown } = {}) {
     }),
   };
   const measurementQueue = { add: jest.fn(), getJobs: jest.fn(async () => []) };
+  const reservations = { nextReservationForTask: jest.fn(async (): Promise<Date | null> => opts.nextReservation ?? null) };
   const service = new MeasurementSchedulingService(
     prisma as any,
     kronosGateway as any,
     experimentConfig as any,
     measurementQueue as any,
+    reservations as any,
   );
-  return { service, prisma, experimentConfig, measurementQueue };
+  return { service, prisma, experimentConfig, measurementQueue, reservations };
 }
 
 describe('MeasurementSchedulingService.estimateSeconds (desde la adquisición del dispositivo de medición)', () => {
@@ -82,6 +84,44 @@ describe('MeasurementSchedulingService.checkAvailability', () => {
   });
 });
 
+describe('MeasurementSchedulingService.checkAvailability (reservas)', () => {
+  const resolved = { acquisition: hiokiAcq, selector: null };
+  // estimación 10 s (1 + 8.01 → 10); con ×1.2 = 12 s
+  const NOW = new Date('2026-11-28T15:00:00.000Z'); // 10:00 en Lima
+  beforeEach(() => { jest.useFakeTimers().setSystemTime(NOW); });
+  afterEach(() => { jest.useRealTimers(); });
+
+  it('termina (×1.2) después del inicio de la siguiente reserva → 409 scheduled_conflict con la hora de Lima', async () => {
+    const next = new Date('2026-11-28T15:00:11.000Z'); // en 11 s < 12 s
+    const { service, reservations } = setup({ resolved, nextReservation: next });
+    const result = await service.checkAvailability(7, [{ points: 801 }], [1]);
+    expect(reservations.nextReservationForTask).toHaveBeenCalledWith(7, NOW);
+    expect(result).toMatchObject({
+      available: false,
+      reason: 'scheduled_conflict',
+      nextScheduledAt: next,
+      message: 'El equipo está reservado a las 10:00; esta medición no terminaría a tiempo',
+    });
+  });
+
+  it('termina justo al inicio de la reserva o antes → admitida', async () => {
+    const exact = setup({ resolved, nextReservation: new Date('2026-11-28T15:00:12.000Z') });
+    expect((await exact.service.checkAvailability(7, [{ points: 801 }], [1])).available).toBe(true);
+    const none = setup({ resolved });
+    expect((await none.service.checkAvailability(7, [{ points: 801 }], [1])).available).toBe(true);
+  });
+
+  it('el 409 de requestMeasurement conserva la forma (error/message/nextScheduledAt)', async () => {
+    const next = new Date('2026-11-28T15:00:05.000Z');
+    const { service, experimentConfig } = setup({ resolved, nextReservation: next });
+    (experimentConfig as any).assertChannels = jest.fn(async () => undefined);
+    await expect(service.requestMeasurement(7, 'u', { ranges: [{ points: 801 }] as any, selectedChannels: [1] })).rejects.toMatchObject({
+      status: 409,
+      response: { statusCode: 409, error: 'scheduled_conflict', nextScheduledAt: next },
+    });
+  });
+});
+
 describe('MeasurementSchedulingService.requestMeasurement (id del job correlacionable)', () => {
   function enqueueSetup() {
     const prisma = { taskPreference: { findFirst: jest.fn(async () => null) } };
@@ -95,7 +135,7 @@ describe('MeasurementSchedulingService.requestMeasurement (id del job correlacio
       add: jest.fn(async (_name: string, _data: any, opts: any) => ({ id: opts?.jobId ?? 99 })),
       getJobs: jest.fn(async () => []),
     };
-    const service = new MeasurementSchedulingService(prisma as any, realtime as any, experimentConfig as any, measurementQueue as any);
+    const service = new MeasurementSchedulingService(prisma as any, realtime as any, experimentConfig as any, measurementQueue as any, { nextReservationForTask: jest.fn(async () => null) } as any);
     return { service, realtime, measurementQueue };
   }
 

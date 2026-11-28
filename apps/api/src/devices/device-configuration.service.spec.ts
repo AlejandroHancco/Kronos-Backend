@@ -18,8 +18,9 @@ function setup() {
     taskPreference: { findMany: jest.fn(async () => []) },
   } as any);
   const ops = { request: jest.fn(async (): Promise<any> => ({})) };
-  const service = new DeviceConfigurationService({ device: { update } } as any, catalog, state, ops as any);
-  return { service, update, locks, ops };
+  const reservations = { reservationNearDevice: jest.fn(async (): Promise<Date | null> => null) };
+  const service = new DeviceConfigurationService({ device: { update } } as any, catalog, state, ops as any, reservations as any);
+  return { service, update, locks, ops, reservations };
 }
 
 const valueOf = (view: { parameters: Array<{ name: string; value: unknown }> }, name: string) =>
@@ -76,6 +77,24 @@ describe('DeviceConfigurationService', () => {
     await expect(service.apply(device('sim-impedance'), { rp: 40000 })).rejects.toBeInstanceOf(ConflictException);
     expect(update).not.toHaveBeenCalled();
     expect(ops.request).not.toHaveBeenCalled();
+  });
+
+  it('apply con una reserva del equipo en curso o a menos de 2 min → 409 y no encola ni guarda', async () => {
+    const { service, update, ops, reservations } = setup();
+    reservations.reservationNearDevice.mockResolvedValue(new Date('2026-11-28T15:00:00.000Z')); // 10:00 en Lima
+    await expect(service.apply(device('kronos-mux-16'), { channel: 3 })).rejects.toThrow(
+      new ConflictException('"MUX" tiene una medición reservada a las 10:00; no se puede configurar ahora'),
+    );
+    await expect(service.apply(device('sim-impedance'), { rp: 40000 })).rejects.toBeInstanceOf(ConflictException);
+    expect(reservations.reservationNearDevice).toHaveBeenCalledWith('kronos-mux-16-1', 'P', expect.any(Date), 120);
+    expect(ops.request).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('view (lectura) no consulta las reservas', async () => {
+    const { service, reservations } = setup();
+    await service.view(device('kronos-mux-16'));
+    expect(reservations.reservationNearDevice).not.toHaveBeenCalled();
   });
 
   it('apply: valores inválidos → 400 con el mensaje del parámetro', async () => {

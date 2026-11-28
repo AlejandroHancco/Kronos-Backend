@@ -276,3 +276,27 @@ describe('SeriesReservationsService.findConflicts', () => {
     ]);
   });
 });
+
+describe('SeriesReservationsService.nextReservationForTask / reservationNearDevice', () => {
+  const pending = [job({ id: 10, taskId: 2, seriesStartAt: at(10), intervalMinutes: null, repeatCount: 1, reservedSeconds: 600, task: { name: 'T2' } })];
+  const prefs = [
+    { taskId: 1, sensorDeviceId: 'A', channelSelectorDeviceId: 'M' },
+    { taskId: 2, sensorDeviceId: 'B', channelSelectorDeviceId: 'M' },
+  ];
+
+  it('nextReservationForTask: próximo inicio estrictamente posterior en los dispositivos de la tarea; null si no hay', async () => {
+    const { service } = setup({ pending, prefs });
+    expect(await service.nextReservationForTask(1, at(0))).toEqual(at(10));
+    expect(await service.nextReservationForTask(1, at(10))).toBeNull();
+    expect(await service.nextReservationForTask(404, at(0))).toBeNull();
+  });
+
+  it('reservationNearDevice: en curso o a ≤ lead segundos; null fuera', async () => {
+    const { service } = setup({ pending, prefs });
+    expect(await service.reservationNearDevice('M', 'P1', at(8.5), 120)).toEqual(at(10));
+    expect(await service.reservationNearDevice('M', 'P1', at(15), 120)).toEqual(at(10));
+    expect(await service.reservationNearDevice('M', 'P1', at(7), 120)).toBeNull();
+    expect(await service.reservationNearDevice('M', 'P1', at(21), 120)).toBeNull();
+    expect(await service.reservationNearDevice('Z', 'P1', at(15), 120)).toBeNull();
+  });
+});

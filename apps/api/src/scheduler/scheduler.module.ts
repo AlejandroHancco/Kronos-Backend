@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '@app/database';
 import { QueueModule } from '@app/queue';
+import { SeriesReservationsModule } from '@app/measurement';
 import { MeasurementSchedulingService } from './scheduling.service';
 import { SchedulerController } from './scheduler.controller';
 
@@ -13,7 +14,7 @@ import { SchedulerController } from './scheduler.controller';
  * viven en el worker (apps/worker).
  */
 @Module({
-  imports: [PrismaModule, QueueModule],
+  imports: [PrismaModule, QueueModule, SeriesReservationsModule],
   controllers: [SchedulerController],
   providers: [MeasurementSchedulingService],
   exports: [MeasurementSchedulingService],

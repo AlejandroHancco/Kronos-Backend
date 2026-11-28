@@ -6,7 +6,7 @@ import type { AcquisitionMetadata, SweepRange } from '@app/laas-catalog';
 import { estimateAcquisitionSeconds } from '@app/laas-catalog';
 import { RealtimePublisher } from '@app/realtime';
 import { MEASUREMENTS_QUEUE, MeasurementJobData, PRIORITY_MANUAL } from '@app/queue';
-import { PrefDevices, sharesDevice } from './device-usage';
+import { SeriesReservationsService, limaTime } from '@app/measurement';
 import { ExperimentConfigService, ResolvedExperiment, toSweepRanges } from '@app/experiments';
 
 /** Experimento resuelto + duración estimada de una ejecución (ver resolveWithEstimate). */
@@ -35,14 +35,13 @@ export interface AvailabilityResult {
  * - Si el equipo está libre, la medición entra y corre de inmediato.
  * - Si hay cola, entra detrás de lo pendiente (concurrencia 1 por hardware).
  * - Se RECHAZA cuando el backlog superaría el máximo, o cuando terminaría
- *   pisando el startAt de una medición programada en los mismos dispositivos.
+ *   pisando la siguiente reserva de una medición programada en los mismos dispositivos.
  */
 @Injectable()
 export class MeasurementSchedulingService {
   private readonly logger = new Logger(MeasurementSchedulingService.name);
   private readonly maxBacklogSeconds =
     Number(process.env.SCHEDULER_MAX_BACKLOG_SECONDS) || 15 * 60;
-  private readonly scheduledMarginSeconds = 60;
 
   constructor(
     private prisma: PrismaService,
@@ -50,6 +49,7 @@ export class MeasurementSchedulingService {
     private experimentConfig: ExperimentConfigService,
     @InjectQueue(MEASUREMENTS_QUEUE)
     private measurementQueue: Queue<MeasurementJobData>,
+    private reservations: SeriesReservationsService,
   ) {}
 
   /** Estimación aditiva (ver acquisition.ts): canales × (cambio de canal + Σ rangos(setup + puntos·t)), desde la adquisición del dispositivo de medición. */
@@ -94,8 +94,8 @@ export class MeasurementSchedulingService {
   /**
    * ¿Se puede aceptar esta medición ahora?
    * 1. Backlog + estimación no debe superar el máximo.
-   * 2. No debe terminar chocando con un ScheduledJob pendiente
-   *    que use los mismos dispositivos (equipo de medición / selector de canal) dentro del horizonte.
+   * 2. Debe terminar (×1.2) antes de la siguiente reserva de una serie programada
+   *    que use los mismos dispositivos (equipo de medición / selector de canal).
    */
   async checkAvailability(
     taskId: number,
@@ -140,20 +140,21 @@ export class MeasurementSchedulingService {
       };
     }
 
-    // Regla 2: choque con mediciones programadas en los mismos dispositivos
-    const horizonSeconds = backlogSeconds + estimatedSeconds + this.scheduledMarginSeconds;
-    const conflict = await this.findScheduledConflict(taskId, horizonSeconds);
-    if (conflict) {
-      return {
-        ...base,
-        available: false,
-        reason: 'scheduled_conflict',
-        nextScheduledAt: conflict.startAt,
-        message:
-          `Esta medición (~${Math.ceil(estimatedSeconds / 60)} min, tras ~${Math.ceil(backlogSeconds / 60)} min de cola) ` +
-          `chocaría con una medición programada para las ${conflict.startAt.toISOString()} ` +
-          `que usa los mismos dispositivos. Intenta después de que se ejecute.`,
-      };
+    // Regla 2: la medición (cola + estimación, con el mismo margen ×1.2 de las reservas) debe terminar
+    // a más tardar cuando empiece la siguiente reserva de sus dispositivos (sensor + selector).
+    const now = new Date();
+    const nextReservation = await this.reservations.nextReservationForTask(taskId, now);
+    if (nextReservation) {
+      const endsAt = now.getTime() + Math.ceil(((backlogSeconds + estimatedSeconds) * 12) / 10) * 1000;
+      if (endsAt > nextReservation.getTime()) {
+        return {
+          ...base,
+          available: false,
+          reason: 'scheduled_conflict',
+          nextScheduledAt: nextReservation,
+          message: `El equipo está reservado a las ${limaTime(nextReservation)}; esta medición no terminaría a tiempo`,
+        };
+      }
     }
 
     return { ...base, available: true };
@@ -219,52 +220,5 @@ export class MeasurementSchedulingService {
       estimatedSeconds: check.estimatedSeconds,
       estimatedWaitSeconds: check.backlogSeconds,
     };
-  }
-
-  /**
-   * Busca un ScheduledJob 'pending' cuyo startAt caiga dentro del horizonte
-   * y cuya tarea comparta equipo de medición o selector de canal con la tarea dada.
-   */
-  private async findScheduledConflict(
-    taskId: number,
-    horizonSeconds: number,
-  ): Promise<{ id: number; startAt: Date } | null> {
-    // Dispositivos de la tarea que quiere medir
-    const myPreference = await this.prisma.taskPreference.findFirst({
-      where: { taskId },
-      orderBy: { createdAt: 'desc' },
-      select: { sensorDeviceId: true, channelSelectorDeviceId: true },
-    });
-    if (!myPreference) return null; // sin preferencia: measureTask fallará con su propio error
-
-    const horizonEnd = new Date(Date.now() + horizonSeconds * 1000);
-
-    const pendingJobs = await this.prisma.scheduledJob.findMany({
-      where: { status: 'pending', startAt: { lte: horizonEnd } },
-      orderBy: { startAt: 'asc' },
-      select: { id: true, taskId: true, startAt: true },
-    });
-    if (pendingJobs.length === 0) return null;
-
-    // Preferencias (devices) de las tareas de esos jobs, en bloque
-    const preferences = await this.prisma.taskPreference.findMany({
-      where: { taskId: { in: [...new Set(pendingJobs.map((j) => j.taskId))] } },
-      orderBy: { createdAt: 'desc' },
-      select: { taskId: true, sensorDeviceId: true, channelSelectorDeviceId: true },
-    });
-    // findMany devuelve todas; nos quedamos con la más reciente por tarea
-    const prefByTask = new Map<number, PrefDevices>();
-    for (const p of preferences) {
-      if (!prefByTask.has(p.taskId)) prefByTask.set(p.taskId, p);
-    }
-
-    for (const job of pendingJobs) {
-      const pref = prefByTask.get(job.taskId);
-      if (!pref) continue;
-      if (sharesDevice(pref, myPreference)) {
-        return { id: job.id, startAt: job.startAt };
-      }
-    }
-    return null;
   }
 }

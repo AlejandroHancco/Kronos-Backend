@@ -115,6 +115,36 @@ export function nextReservationStart(series: SeriesWindow[], after: Date): Date 
   return best === null ? null : new Date(best);
 }
 
+/**
+ * Inicio de la ocurrencia en curso (inicio ≤ now < inicio + reserva) o que empieza a lo sumo `leadSeconds`
+ * después de `now`; la más temprana entre todas las series, o null.
+ */
+export function reservationNear(series: SeriesWindow[], now: Date, leadSeconds: number): Date | null {
+  const nowMs = now.getTime();
+  let best: number | null = null;
+  for (const s of series) {
+    const n = normalize(s);
+    if (n.count === 0) continue;
+    // inicios en (now − reserva, now + lead] (cota superior exclusiva +1 ms)
+    const [lo, hi] = startsWithin(n, nowMs - n.reserved, nowMs + leadSeconds * 1000 + 1);
+    if (lo > hi) continue;
+    const start = n.start + lo * n.period;
+    if (best === null || start < best) best = start;
+  }
+  return best === null ? null : new Date(best);
+}
+
+/** HH:MM en hora local de Lima (para mensajes al usuario). */
+export function limaTime(date: Date): string {
+  return new Intl.DateTimeFormat('es-PE', {
+    timeZone: 'America/Lima',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    hourCycle: 'h23',
+  }).format(date);
+}
+
 /** ceil(max(estimación, ...reales) × 1.2), al menos estimación + 60 s. */
 export function reservedSecondsFor(estimateSeconds: number, actualDurationsSeconds: number[]): number {
   const max = Math.max(estimateSeconds, ...actualDurationsSeconds);

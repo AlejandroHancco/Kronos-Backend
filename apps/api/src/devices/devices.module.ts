@@ -4,9 +4,10 @@ import { DevicesController, ProjectDevicesController } from './devices.controlle
 import { DeviceConfigurationService } from './device-configuration.service';
 import { PrismaModule } from '@app/database';
 import { QueueModule } from '@app/queue';
+import { SeriesReservationsModule } from '@app/measurement';
 
 @Module({
-  imports: [PrismaModule, QueueModule],
+  imports: [PrismaModule, QueueModule, SeriesReservationsModule],
   controllers: [DevicesController, ProjectDevicesController],
   providers: [DevicesService, DeviceConfigurationService],
   exports: [DevicesService],

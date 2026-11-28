@@ -3,6 +3,7 @@ import { Device, Prisma } from '@prisma/client';
 import { PrismaService } from '@app/database';
 import { DeviceStateService, deviceBusyMessage } from '@app/redis';
 import { DeviceOpsClient } from '@app/queue';
+import { SeriesReservationsService, limaTime } from '@app/measurement';
 import {
   ConfigurationParameterMetadata,
   ConfigurationValue,
@@ -14,6 +15,9 @@ import {
   splitPatch,
 } from '@app/laas-catalog';
 import { deviceOpTimeoutMs, mapDeviceOpError } from './device-op-errors';
+
+/** Margen (s) antes de una reserva en el que ya no se aceptan escrituras de configuración. */
+const RESERVATION_LEAD_SECONDS = 120;
 
 export type ConfigurationParameterView = ConfigurationParameterMetadata & { value: ConfigurationValue | null };
 
@@ -37,6 +41,7 @@ export class DeviceConfigurationService {
     private catalog: LaasCatalog,
     private deviceState: DeviceStateService,
     private deviceOps: DeviceOpsClient,
+    private reservations: SeriesReservationsService,
   ) {}
 
   async view(device: Device): Promise<DeviceConfigurationView> {
@@ -74,6 +79,13 @@ export class DeviceConfigurationService {
 
     const crossFieldError = this.catalog.validateConfiguration(device.type, { ...effectiveConfiguration(params, device.configuration), ...persisted });
     if (crossFieldError) throw new BadRequestException(crossFieldError);
+
+    // Escribir en el equipo (lo bloquea) no debe invadir una medición reservada: se rechaza si hay una
+    // reserva en curso o que empieza en los próximos 2 min. Las lecturas (view) no pasan por aquí.
+    const reserved = await this.reservations.reservationNearDevice(device.id, device.projectId, new Date(), RESERVATION_LEAD_SECONDS);
+    if (reserved) {
+      throw new ConflictException(`"${device.name}" tiene una medición reservada a las ${limaTime(reserved)}; no se puede configurar ahora`);
+    }
 
     const hasLive = Object.keys(live).length > 0;
     if (hasLive && description.connection.requiresIp && !device.ip) {
