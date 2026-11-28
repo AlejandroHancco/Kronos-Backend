@@ -5,7 +5,7 @@ import type Redis from 'ioredis';
 import { DeviceBusyTimeoutError, DeviceStateService, RedisLockService } from '@app/redis';
 import type { MeasurementJobData } from '@app/queue';
 import { MEASUREMENTS_QUEUE, SCHEDULED_MEASUREMENTS_QUEUE } from '@app/queue';
-import { MeasurementProcessor, ScheduledMeasurementProcessor } from './measurement.processor';
+import { MeasurementProcessor, ScheduledMeasurementProcessor, scheduledConcurrency } from './measurement.processor';
 import { MeasurementJobRunner } from './measurement-job.runner';
 
 const makeJob = (over: Partial<MeasurementJobData> = {}) =>
@@ -201,6 +201,12 @@ describe('Processors de medición: colas y concurrencia', () => {
       name: 'execute',
       concurrency: 4,
     });
+  });
+
+  it('SCHEDULED_CONCURRENCY fija la concurrencia programada; ausente o inválida ⇒ 4', () => {
+    expect(scheduledConcurrency({ SCHEDULED_CONCURRENCY: '8' })).toBe(8);
+    expect(scheduledConcurrency({})).toBe(4);
+    for (const bad of ['0', '-2', '2.5', 'abc', '']) expect(scheduledConcurrency({ SCHEDULED_CONCURRENCY: bad })).toBe(4);
   });
 
   it.each([MeasurementProcessor, ScheduledMeasurementProcessor])('%p delega en el mismo MeasurementJobRunner', async (cls) => {
