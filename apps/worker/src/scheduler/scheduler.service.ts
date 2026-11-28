@@ -9,6 +9,7 @@ import type { SweepRange } from '@app/laas-catalog';
 import {
   MissReason,
   SeriesReservationsService,
+  SeriesWindow,
   estimateSeconds,
   nextReservationStart,
   occurrenceStart,
@@ -100,8 +101,8 @@ export class SchedulerService {
   }
 
   /**
-   * Marca el job 'missed' (si sigue pending o running) con el motivo y crea la siguiente repetición
-   * en la rejilla. Idempotente: si ya estaba resuelto no hace nada.
+   * Marca el job 'missed' (si sigue pending o running) con el motivo; si era pending crea la
+   * siguiente repetición en la rejilla (un running ya la tiene). Idempotente: si ya estaba resuelto no hace nada.
    */
   async markMissed(jobId: number, reason: MissReason): Promise<void> {
     const job = await this.prisma.scheduledJob.findUnique({ where: { id: jobId } });
@@ -218,7 +219,8 @@ export class SchedulerService {
 
   /**
    * null mientras pueda esperar: dentro de la ventana y `now + estimación ≤` próxima reserva de sus
-   * dispositivos (sin contar su propia cadena). Si no, el motivo según el límite que cerró primero.
+   * dispositivos, incluido el siguiente punto de su propia cadena (aún sin fila: se crea al publicar
+   * o perder este). Si no, el motivo según el límite que cerró primero.
    */
   private async missReason(
     job: ChainJob,
@@ -231,10 +233,20 @@ export class SchedulerService {
   ): Promise<MissReason | null> {
     const projectId = await this.reservations.projectOfTask(job.taskId);
     // cadenas pendientes + ocurrencias ya publicadas (running) que aún no empezaron
-    const series = [
+    const series: SeriesWindow[] = [
       ...(await this.reservations.seriesForDevices(devices, [job.id], projectId ?? undefined)),
       ...(await this.reservations.runningForDevices(devices, [job.id], projectId ?? undefined)),
     ];
+    // un punto atrasado nunca retrasa al siguiente de su propia serie
+    if (job.intervalMinutes && job.repeatCount > 1) {
+      series.push({
+        seriesStartAt: occurrenceStart(job, job.executionIndex + 1),
+        intervalMinutes: null,
+        firstIndex: 1,
+        lastIndex: 1,
+        reservedSeconds: job.reservedSeconds,
+      });
+    }
     // reservas que empiezan después del inicio planificado: si alguna ya empezó, el hueco se perdió
     const next = nextReservationStart(series, job.startAt);
     const slotCloseAt = next ? next.getTime() - estimatedSeconds * 1000 : Infinity;
@@ -247,15 +259,27 @@ export class SchedulerService {
   }
 
   /**
-   * Marca 'running', crea la siguiente repetición (antes de publicar: una caída entre ambos no corta
-   * la serie; el reaper resuelve el running huérfano) y publica el job Bull diferido.
+   * Marca 'running' y crea la siguiente repetición en la MISMA transacción (un running siempre tiene
+   * su siguiente fila: missJob de un running no la recrea, y una caída nunca corta la serie; el
+   * reaper resuelve el running huérfano) y después publica el job Bull diferido.
    */
   private async enqueue(job: ChainJob, now: Date, estimate: Estimate, devices: string[], busyDevices: Set<string>) {
-    const claimed = await this.prisma.scheduledJob.updateMany({
-      where: { id: job.id, status: 'pending' },
-      data: { status: 'running' },
+    const claimed = await this.prisma.$transaction(async (tx) => {
+      const claim = await tx.scheduledJob.updateMany({
+        where: { id: job.id, status: 'pending' },
+        data: { status: 'running' },
+      });
+      if (claim.count === 0) return false; // otro proceso lo tomó
+      if (job.intervalMinutes && job.repeatCount > 1) {
+        // skipDuplicates (ON CONFLICT DO NOTHING): ya existente tras un reinicio no aborta la transacción
+        await tx.scheduledJob.createMany({
+          data: [{ ...this.chainRow(job, job.executionIndex + 1), status: 'pending' }],
+          skipDuplicates: true,
+        });
+      }
+      return true;
     });
-    if (claimed.count === 0) return; // otro proceso lo tomó
+    if (!claimed) return;
 
     devices.forEach((id) => busyDevices.add(id));
 
@@ -273,8 +297,6 @@ export class SchedulerService {
       toleranceMinutes: job.toleranceMinutes,
     };
     const delay = Math.max(0, job.startAt.getTime() - now.getTime());
-
-    await this.createNext(job);
 
     // jobId determinista: uno terminado (completed/failed) bloquearía el add; uno vivo ya basta
     const existing = await this.measurementQueue.getJob(jobId);
@@ -342,19 +364,28 @@ export class SchedulerService {
     return openIndex ? this.createPending(job, openIndex) : null;
   }
 
+  /**
+   * Solo un pending perdido crea la siguiente repetición: un running ya la creó al publicarse
+   * (enqueue); recrearla resucitaría una serie cuyo siguiente punto el usuario eliminó.
+   */
   private async missJob(job: ChainJob, reason: MissReason): Promise<void> {
-    if (!(await this.setMissed(job.id, reason))) return;
+    if ((await this.setMissed(job.id, reason)) !== 'pending') return;
     await this.createNext(job);
   }
 
-  /** true si el job pasó a 'missed' (seguía pending o running). */
-  private async setMissed(jobId: number, reason: MissReason): Promise<boolean> {
-    const updated = await this.prisma.scheduledJob.updateMany({
-      where: { id: jobId, status: { in: ['pending', 'running'] } },
-      data: { status: 'missed', missReason: reason },
-    });
-    if (updated.count > 0) this.logger.warn(`Job ${jobId} marcado como missed: ${reason}`);
-    return updated.count > 0;
+  /** Estado desde el que el job pasó a 'missed' (pending o running), o null si ya estaba resuelto. */
+  private async setMissed(jobId: number, reason: MissReason): Promise<'pending' | 'running' | null> {
+    for (const from of ['pending', 'running'] as const) {
+      const updated = await this.prisma.scheduledJob.updateMany({
+        where: { id: jobId, status: from },
+        data: { status: 'missed', missReason: reason },
+      });
+      if (updated.count > 0) {
+        this.logger.warn(`Job ${jobId} marcado como missed (${from}): ${reason}`);
+        return from;
+      }
+    }
+    return null;
   }
 
   /** Siguiente repetición en la rejilla, si quedan. */

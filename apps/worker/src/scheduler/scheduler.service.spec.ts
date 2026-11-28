@@ -1,5 +1,4 @@
 import { BadRequestException, Logger } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
 import { SCHEDULE_INTERVAL_OPTIONS } from '@nestjs/schedule/dist/schedule.constants';
 import { SchedulerService } from './scheduler.service';
 import { PRIORITY_SCHEDULED } from '@app/queue';
@@ -72,7 +71,7 @@ interface SetupOpts {
 function setup(dueJobs: any[], resolveFor: (taskId: number) => unknown, opts: SetupOpts = {}) {
   const { leader = true, busy = [], offline = [], others = [], runningOthers = [], running = [], bull = {}, measured = [] } = opts;
   let nextId = 100;
-  const prisma = {
+  const prisma: any = {
     scheduledJob: {
       findMany: jest.fn(async (args: any) => {
         if (args?.where?.status !== 'running') return dueJobs;
@@ -81,7 +80,12 @@ function setup(dueJobs: any[], resolveFor: (taskId: number) => unknown, opts: Se
       }),
       findUnique: jest.fn(async (args: any) => [...dueJobs, ...running].find((j) => j.id === args.where.id) ?? null),
       update: jest.fn(async (args: any) => ({ id: args.where.id })),
-      updateMany: jest.fn(async () => ({ count: 1 })),
+      // condicional al estado: una fila conocida con otro status no se actualiza
+      updateMany: jest.fn(async (args: any) => {
+        const row = [...dueJobs, ...running].find((j) => j.id === args.where.id);
+        const want = args.where.status;
+        return { count: row && typeof want === 'string' && row.status !== want ? 0 : 1 };
+      }),
       create: jest.fn(async (args: any) => ({ id: nextId++, ...args.data })),
       createMany: jest.fn(async (args: any) => ({ count: args.data.length })),
     },
@@ -94,6 +98,7 @@ function setup(dueJobs: any[], resolveFor: (taskId: number) => unknown, opts: Se
         (args.where.id.in as string[]).map((id) => ({ id, status: offline.includes(id) ? 'offline' : 'online' })),
       ),
     },
+    $transaction: jest.fn(async (fn: (tx: any) => Promise<unknown>) => fn(prisma)),
     measurement: {
       findFirst: jest.fn(async (args: any) => (measured.includes(args.where.scheduledJobId) ? { id: 1 } : null)),
     },
@@ -210,14 +215,15 @@ describe('SchedulerService', () => {
       await service.processPendingJobs();
 
       expect(queue.add).toHaveBeenCalledWith('execute', expect.anything(), expect.objectContaining({ delay: 0 }));
-      expect(prisma.scheduledJob.create).toHaveBeenCalledWith({
-        data: {
+      expect(prisma.scheduledJob.createMany).toHaveBeenCalledWith({
+        data: [{
           taskId: 1, createdBy: 'user-1', label: 'cada hora',
           startAt: new Date(series.getTime() + 2 * 60 * MIN), // seriesStartAt + executionIndex × interval
           intervalMinutes: 60, repeatCount: 3, executionIndex: 3,
           seriesStartAt: series, toleranceMinutes: 5, reservedSeconds: 120, channelNumbers: [1],
           status: 'pending',
-        },
+        }],
+        skipDuplicates: true,
       });
     });
 
@@ -240,14 +246,14 @@ describe('SchedulerService', () => {
       await service.processPendingJobs();
       expect(queue.add).toHaveBeenCalledTimes(1); // 8 comparte dispositivo con 7, que ya lo ocupa
       expect(prisma.scheduledJob.create).not.toHaveBeenCalled();
+      expect(prisma.scheduledJob.createMany).not.toHaveBeenCalled();
     });
 
-    it('siguiente repetición ya existente (P2002 tras un reinicio): se ignora, sin error', async () => {
+    it('siguiente repetición ya existente (tras un reinicio): skipDuplicates, sin abortar la transacción ni error', async () => {
       const { service, prisma, queue } = setup([job()], () => resolvedWith(singleAcq, []));
-      prisma.scheduledJob.create.mockRejectedValueOnce(
-        new Prisma.PrismaClientKnownRequestError('Unique constraint failed', { code: 'P2002', clientVersion: 'test' }),
-      );
+      prisma.scheduledJob.createMany.mockResolvedValueOnce({ count: 0 });
       await service.processPendingJobs();
+      expect(prisma.scheduledJob.createMany).toHaveBeenCalledWith(expect.objectContaining({ skipDuplicates: true }));
       expect(queue.add).toHaveBeenCalledTimes(1);
       expect(Logger.prototype.error).not.toHaveBeenCalled();
     });
@@ -257,25 +263,26 @@ describe('SchedulerService', () => {
       prisma.scheduledJob.updateMany.mockResolvedValueOnce({ count: 0 });
       await service.processPendingJobs();
       expect(queue.add).not.toHaveBeenCalled();
-      expect(prisma.scheduledJob.create).not.toHaveBeenCalled();
+      expect(prisma.scheduledJob.createMany).not.toHaveBeenCalled();
     });
 
-    it('crea la siguiente repetición ANTES de publicar (una caída entre ambos no corta la serie)', async () => {
+    it('reclama y crea la siguiente repetición en la misma transacción, ANTES de publicar (una caída nunca corta la serie)', async () => {
       const { service, prisma, queue } = setup([job()], () => resolvedWith(singleAcq, []));
       await service.processPendingJobs();
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
       const claim = prisma.scheduledJob.updateMany.mock.invocationCallOrder[0];
-      const next = prisma.scheduledJob.create.mock.invocationCallOrder[0];
+      const next = prisma.scheduledJob.createMany.mock.invocationCallOrder[0];
       const add = queue.add.mock.invocationCallOrder[0];
       expect(claim).toBeLessThan(next);
       expect(next).toBeLessThan(add);
     });
 
-    it('si publicar en la cola falla, el job vuelve a pending; la siguiente ya existe (el reintento choca con P2002)', async () => {
+    it('si publicar en la cola falla, el job vuelve a pending; la siguiente ya existe (el reintento la omite con skipDuplicates)', async () => {
       const { service, prisma, queue } = setup([job()], () => resolvedWith(singleAcq, []));
       queue.add.mockRejectedValueOnce(new Error('redis caído'));
       await service.processPendingJobs();
       expect(prisma.scheduledJob.updateMany).toHaveBeenCalledWith({ where: { id: 7, status: 'running' }, data: { status: 'pending' } });
-      expect(prisma.scheduledJob.create).toHaveBeenCalledWith({ data: expect.objectContaining({ executionIndex: 2 }) });
+      expect(prisma.scheduledJob.createMany).toHaveBeenCalledWith({ data: [expect.objectContaining({ executionIndex: 2 })], skipDuplicates: true });
     });
 
     it('jobId ya en Bull terminado (completed/failed): se elimina y se vuelve a publicar', async () => {
@@ -331,7 +338,7 @@ describe('SchedulerService', () => {
     it('ventana cerrada con el dispositivo ocupado: missed device_busy y la serie sigue en la rejilla', async () => {
       const { service, prisma, queue } = setup([job(expired)], () => resolvedWith(singleAcq, []), { busy: ['S'] });
       await service.processPendingJobs();
-      expect(missedUpdate(prisma)).toEqual({ where: { id: 7, status: { in: ['pending', 'running'] } }, data: { status: 'missed', missReason: 'device_busy' } });
+      expect(missedUpdate(prisma)).toEqual({ where: { id: 7, status: 'pending' }, data: { status: 'missed', missReason: 'device_busy' } });
       expect(queue.add).not.toHaveBeenCalled();
       expect(prisma.scheduledJob.create).toHaveBeenCalledWith({
         data: expect.objectContaining({ executionIndex: 2, repeatCount: 2, status: 'pending', startAt: new Date(expired.seriesStartAt.getTime() + 60 * MIN) }),
@@ -372,6 +379,18 @@ describe('SchedulerService', () => {
       expect(missedUpdate(prisma)?.data).toEqual({ status: 'missed', missReason: 'no_slot' });
     });
 
+    it('el siguiente punto de su propia cadena (aún sin fila) limita: no cabe antes de k+1 => missed no_slot con la ventana abierta', async () => {
+      // intervalo 10 min, k a now - 4 min => k+1 a now + 6 min; estimación 400 s > 6 min
+      const longAcq = { kind: 'single' as const, secondsPerReading: 400 };
+      const { service, prisma } = setup(
+        [job({ startAt: at(-4 * MIN), seriesStartAt: at(-4 * MIN), intervalMinutes: 10, reservedSeconds: 420 })],
+        () => resolvedWith(longAcq, []),
+        { busy: ['S'] },
+      );
+      await service.processPendingJobs();
+      expect(missedUpdate(prisma)?.data).toEqual({ status: 'missed', missReason: 'no_slot' });
+    });
+
     it('reserva justo al límite (now + estimación = inicio): aún espera', async () => {
       const { service, prisma } = setup([job({ startAt: at(-MIN), seriesStartAt: at(-MIN) })], () => resolvedWith(singleAcq, []), {
         busy: ['S'],
@@ -408,7 +427,7 @@ describe('SchedulerService', () => {
       const { service, prisma, queue, resolve } = setup([job({ seriesStartAt: series, startAt: series, repeatCount: 10 })], () => resolvedWith(singleAcq, []));
       await service.processPendingJobs();
 
-      expect(missedUpdate(prisma)).toEqual({ where: { id: 7, status: { in: ['pending', 'running'] } }, data: { status: 'missed', missReason: 'system_down' } });
+      expect(missedUpdate(prisma)).toEqual({ where: { id: 7, status: 'pending' }, data: { status: 'missed', missReason: 'system_down' } });
       expect(prisma.scheduledJob.createMany).toHaveBeenCalledWith({
         data: [2, 3, 4].map((idx) => ({
           taskId: 1, createdBy: 'user-1', label: 'cada hora',
@@ -481,13 +500,15 @@ describe('SchedulerService', () => {
   describe('reaper de running huérfanos', () => {
     const expiredRunning = { id: 40, status: 'running', startAt: at(-10 * MIN), seriesStartAt: at(-10 * MIN) };
 
-    it('running con la ventana cerrada y sin job Bull (caída entre claim y publicación): missed system_down y la serie sigue', async () => {
+    it('running con la ventana cerrada y sin job Bull (caída entre claim y publicación): missed system_down; la serie sigue en el pending creado al reclamar', async () => {
       const { service, prisma, queue } = setup([], () => null, { running: [job(expiredRunning)] });
       await service.processPendingJobs();
       expect(prisma.scheduledJob.findMany).toHaveBeenCalledWith({ where: { status: 'running', startAt: { lte: NOW } } });
       expect(queue.getJob).toHaveBeenCalledWith('scheduled-40');
-      expect(missedUpdate(prisma, 40)?.data).toEqual({ status: 'missed', missReason: 'system_down' });
-      expect(prisma.scheduledJob.create).toHaveBeenCalledWith({ data: expect.objectContaining({ executionIndex: 2 }) });
+      expect(prisma.scheduledJob.updateMany).toHaveBeenCalledWith({ where: { id: 40, status: 'running' }, data: { status: 'missed', missReason: 'system_down' } });
+      // la siguiente fila se creó en la misma transacción que el claim: no se recrea
+      expect(prisma.scheduledJob.create).not.toHaveBeenCalled();
+      expect(prisma.scheduledJob.createMany).not.toHaveBeenCalled();
     });
 
     it('running con ventana cerrada pero con job Bull (midiendo): no se toca', async () => {
@@ -543,11 +564,21 @@ describe('SchedulerService', () => {
   });
 
   describe('markMissed', () => {
-    it('marca missed (pending o running) con el motivo y crea la siguiente repetición en la rejilla', async () => {
+    it('running perdido después de que el usuario eliminara su siguiente pending: missed, sin crear fila nueva (no resucita la serie)', async () => {
       const series = at(-30 * MIN);
+      // la fila k+1 (creada al publicar 7) ya no existe: el usuario la eliminó
       const { service, prisma } = setup([job({ id: 7, status: 'running', seriesStartAt: series, startAt: series })], () => null);
+      await service.markMissed(7, 'no_slot');
+      expect(prisma.scheduledJob.updateMany).toHaveBeenCalledWith({ where: { id: 7, status: 'running' }, data: { status: 'missed', missReason: 'no_slot' } });
+      expect(prisma.scheduledJob.create).not.toHaveBeenCalled();
+      expect(prisma.scheduledJob.createMany).not.toHaveBeenCalled();
+    });
+
+    it('pending: marca missed con el motivo y crea la siguiente repetición en la rejilla', async () => {
+      const series = at(-30 * MIN);
+      const { service, prisma } = setup([job({ id: 7, status: 'pending', seriesStartAt: series, startAt: series })], () => null);
       await service.markMissed(7, 'tolerance_exceeded');
-      expect(missedUpdate(prisma)).toEqual({ where: { id: 7, status: { in: ['pending', 'running'] } }, data: { status: 'missed', missReason: 'tolerance_exceeded' } });
+      expect(missedUpdate(prisma)).toEqual({ where: { id: 7, status: 'pending' }, data: { status: 'missed', missReason: 'tolerance_exceeded' } });
       expect(prisma.scheduledJob.create).toHaveBeenCalledWith({
         data: expect.objectContaining({ executionIndex: 2, repeatCount: 2, startAt: new Date(series.getTime() + 60 * MIN) }),
       });
