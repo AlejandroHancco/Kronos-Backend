@@ -16,6 +16,8 @@ const LEADER_TTL_MS = 25_000;
 const FAILURES_TO_OFFLINE = 2;
 /** El contador caduca si deja de chequearse (p. ej. dispositivo archivado), para no arrastrar fallos viejos. */
 const FAIL_COUNTER_TTL_S = 3600;
+/** La marca de caída caduca a los 30 días (una caída más larga ya no se avisa al recuperarse). */
+const DOWN_MARKER_TTL_S = 30 * 24 * 3600;
 
 /** Fallos consecutivos de chequeo del dispositivo. */
 export const failKey = (deviceId: string) => `health:fail:${deviceId}`;
@@ -83,39 +85,60 @@ export class DeviceHealthService {
     }
   }
 
+  /**
+   * Aislado por dispositivo: un error (p. ej. Redis del rebote caído) se registra y no corta el
+   * lote. Las lecturas/escrituras de Redis van antes de cambiar el estado, así que un error de Redis
+   * equivale a "sin información": el estado actual se mantiene.
+   */
   private async checkOne(device: CheckedDevice) {
-    const reachable = await this.reachability.check(device.type ?? '', device.ip);
-    if (reachable) await this.onReachable(device);
-    else await this.onUnreachable(device);
+    try {
+      const reachable = await this.reachability.check(device.type ?? '', device.ip);
+      if (reachable) await this.onReachable(device);
+      else await this.onUnreachable(device);
+    } catch (err) {
+      this.logger.error(
+        `Chequeo de ${device.id} sin resultado (se mantiene ${device.status})`,
+        err instanceof Error ? err.stack : err,
+      );
+    }
   }
 
   private async onReachable(device: CheckedDevice) {
     await this.redis.del(failKey(device.id));
     if (device.status === 'online') return;
 
-    await this.setStatus(device, 'online');
     const downIso = await this.redis.get(downKey(device.id));
+    await this.setStatus(device, 'online');
     if (!downIso) return; // no venía de una caída avisada (p. ej. dispositivo nuevo): nada que notificar
-    await this.redis.del(downKey(device.id));
+    await this.safely(`borrado de ${downKey(device.id)}`, () => this.redis.del(downKey(device.id)));
     await this.safely(`aviso de recuperación de ${device.id}`, () =>
       this.alerts.deviceOnline(alertDevice(device), new Date(downIso), new Date()),
     );
   }
 
   private async onUnreachable(device: CheckedDevice) {
-    const failures = await this.redis.incr(failKey(device.id));
-    await this.redis.expire(failKey(device.id), FAIL_COUNTER_TTL_S);
+    const failures = await this.countFailure(device.id);
     if (device.status === 'offline') return;
     if (device.status === 'online' && failures < FAILURES_TO_OFFLINE) return;
 
-    await this.setStatus(device, 'offline');
-    // sin chequear → offline: nunca estuvo online, no es una caída
-    if (device.status !== 'online') return;
+    // sin chequear → offline: nunca estuvo online, no es una caída (sin health:down ni aviso)
+    const wasOnline = device.status === 'online';
     const at = new Date();
-    await this.safely(`aviso de desconexión de ${device.id}`, async () => {
-      await this.redis.set(downKey(device.id), at.toISOString());
-      await this.alerts.deviceOffline(alertDevice(device), at);
-    });
+    // antes de tocar la BD: si Redis falla, el dispositivo sigue online y se reintenta en el próximo chequeo
+    if (wasOnline) await this.redis.set(downKey(device.id), at.toISOString(), 'EX', DOWN_MARKER_TTL_S);
+    await this.setStatus(device, 'offline');
+    if (!wasOnline) return;
+    await this.safely(`aviso de desconexión de ${device.id}`, () =>
+      this.alerts.deviceOffline(alertDevice(device), at),
+    );
+  }
+
+  /** INCR + EXPIRE del contador de fallos en una transacción; lanza si Redis falla. */
+  private async countFailure(deviceId: string): Promise<number> {
+    const results = await this.redis.multi().incr(failKey(deviceId)).expire(failKey(deviceId), FAIL_COUNTER_TTL_S).exec();
+    const [incr] = results ?? [];
+    if (!incr || incr[0]) throw incr?.[0] ?? new Error(`MULTI de ${failKey(deviceId)} abortado`);
+    return Number(incr[1]);
   }
 
   private async setStatus(device: CheckedDevice, status: 'online' | 'offline') {

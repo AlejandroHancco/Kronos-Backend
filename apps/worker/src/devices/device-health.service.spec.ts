@@ -5,6 +5,11 @@ import { DeviceAlerts } from './device-alerts';
 
 const catalog = new LaasCatalog([HIOKI_IM3570, KRONOS_MUX_16, SIM_IMPEDANCE]);
 
+// ioredis-mock comparte los datos entre instancias del mismo host: cada test empieza limpio
+beforeEach(async () => {
+  await new RedisMock().flushall();
+});
+
 function setup(devices: any[], opts: { reachable?: boolean; leader?: boolean; deviceStatus?: jest.Mock } = {}) {
   const prisma = {
     device: {
@@ -169,6 +174,72 @@ describe('DeviceHealthService: desconexión con rebote y alertas', () => {
     expect(alerts.deviceOffline).not.toHaveBeenCalled();
   });
 
+  it('health:down (TTL 30 días) se escribe antes de pasar la BD a offline', async () => {
+    const { service, prisma, redis } = setup([hioki()], { reachable: false });
+    let downAtUpdate: string | null = 'unset';
+    prisma.device.update.mockImplementationOnce(async () => {
+      downAtUpdate = await redis.get('health:down:h1');
+      return {};
+    });
+    await service.checkAllDevices();
+    await service.checkAllDevices();
+    expect(prisma.device.update).toHaveBeenCalledTimes(1);
+    expect(downAtUpdate).not.toBeNull();
+    expect(downAtUpdate).not.toBe('unset');
+    const ttl = await redis.ttl('health:down:h1');
+    expect(ttl).toBeGreaterThan(30 * 24 * 3600 - 10);
+    expect(ttl).toBeLessThanOrEqual(30 * 24 * 3600);
+    expect(await redis.ttl('health:fail:h1')).toBeGreaterThan(0); // incr + expire juntos
+  });
+
+  it('si Redis falla al marcar la caída, el dispositivo sigue online (sin aviso) y se reintenta después', async () => {
+    const { service, prisma, redis, alerts } = setup([hioki()], { reachable: false });
+    const errorSpy = jest.spyOn((service as any).logger, 'error').mockImplementation(() => undefined);
+    await service.checkAllDevices();
+    jest.spyOn(redis, 'set').mockRejectedValueOnce(new Error('redis down') as never);
+    await service.checkAllDevices();
+    expect(prisma.device.update).not.toHaveBeenCalled();
+    expect(alerts.deviceOffline).not.toHaveBeenCalled();
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+
+    await service.checkAllDevices(); // Redis vuelve: ahora sí
+    expect(prisma.device.update).toHaveBeenCalledWith({ where: { id: 'h1' }, data: { status: 'offline' } });
+    expect(alerts.deviceOffline).toHaveBeenCalledTimes(1);
+  });
+
+  it('un error de Redis en un dispositivo no corta el chequeo de los demás (se mantiene su estado)', async () => {
+    const devices = [
+      { ...hioki(), status: 'offline' },
+      { ...hioki(), id: 'h2', name: 'Hioki 2', status: 'offline' },
+    ];
+    const { service, prisma, redis } = setup(devices);
+    const errorSpy = jest.spyOn((service as any).logger, 'error').mockImplementation(() => undefined);
+    jest.spyOn(redis, 'del').mockRejectedValueOnce(new Error('redis down') as never);
+
+    await expect(service.checkAllDevices()).resolves.toBeUndefined();
+
+    expect(prisma.device.update).toHaveBeenCalledTimes(1); // el otro sí pasa a online
+    expect(devices.filter((d) => d.status === 'offline')).toHaveLength(1);
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('si falla el MULTI del contador, el dispositivo mantiene su estado y el resto sigue', async () => {
+    const devices = [hioki(), { ...hioki(), id: 'h2', name: 'Hioki 2' }];
+    const { service, prisma, redis } = setup(devices, { reachable: false });
+    const errorSpy = jest.spyOn((service as any).logger, 'error').mockImplementation(() => undefined);
+    await service.checkAllDevices();
+    const realMulti = redis.multi.bind(redis);
+    jest.spyOn(redis, 'multi').mockImplementationOnce(() => {
+      const m = realMulti();
+      m.exec = async () => [[new Error('redis down'), null]] as any;
+      return m;
+    });
+    await service.checkAllDevices();
+    expect(prisma.device.update).toHaveBeenCalledTimes(1); // solo el que pudo contar su 2.º fallo
+    expect(devices.filter((d) => d.status === 'online')).toHaveLength(1);
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+  });
+
   it('un fallo al alertar no rompe el ciclo: se registra y el resto de dispositivos se chequea', async () => {
     const devices = [hioki(), { ...hioki(), id: 'h2', name: 'Hioki 2' }];
     const { service, prisma, alerts } = setup(devices, { reachable: false });
@@ -254,6 +325,21 @@ describe('DeviceAlerts', () => {
     expect(writer.notifyDeviceOffline).toHaveBeenCalledTimes(2);
     expect(outbox.enqueue).toHaveBeenCalledTimes(2);
     expect(errorSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('si no se pueden contar las mediciones en riesgo, el aviso sale igual con N = 0', async () => {
+    const { alerts, writer, outbox, reservations } = setupAlerts();
+    reservations.upcomingForDevice.mockRejectedValueOnce(new Error('db'));
+    const errorSpy = jest.spyOn((alerts as any).logger, 'error').mockImplementation(() => undefined);
+    const at = new Date('2026-11-27T19:05:00.000Z');
+
+    await alerts.deviceOffline(device, at);
+
+    expect(writer.notifyDeviceOffline).toHaveBeenCalledWith('t1', ['u1', 'u2'], { id: 'h1', name: 'Hioki 1' }, 0, '14:05');
+    expect(outbox.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({ text: 'Hioki 1 se desconectó a las 14:05. 0 mediciones programadas en la próxima hora.' }),
+    );
+    expect(errorSpy).toHaveBeenCalledTimes(1);
   });
 
   it('sin equipos relacionados no consulta miembros ni notifica', async () => {

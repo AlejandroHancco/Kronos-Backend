@@ -41,12 +41,7 @@ export class DeviceAlerts {
   async deviceOffline(device: AlertDevice, at: Date): Promise<void> {
     const { teams, adminEmails } = await this.recipients(device.projectId);
     if (teams.length === 0) return;
-    const atRisk = await this.reservations.upcomingForDevice(
-      device.id,
-      device.projectId,
-      at,
-      AT_RISK_MINUTES,
-    );
+    const atRisk = await this.atRisk(device, at);
     const hhmm = limaTime(at);
     const ref = { id: device.id, name: device.name };
 
@@ -132,6 +127,24 @@ export class DeviceAlerts {
       teams: [...byTeam].map(([teamId, userIds]) => ({ teamId, userIds })),
       adminEmails: [...adminEmails],
     };
+  }
+
+  /** Mediciones en riesgo en la próxima hora; si no se pueden calcular, 0 (el aviso sale igual). */
+  private async atRisk(device: AlertDevice, at: Date): Promise<number> {
+    try {
+      return await this.reservations.upcomingForDevice(
+        device.id,
+        device.projectId,
+        at,
+        AT_RISK_MINUTES,
+      );
+    } catch (err) {
+      this.logger.error(
+        `No se pudieron contar las mediciones en riesgo de ${device.id}`,
+        err instanceof Error ? err.stack : err,
+      );
+      return 0;
+    }
   }
 
   private async attempt(
