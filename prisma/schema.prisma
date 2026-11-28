@@ -480,6 +480,8 @@ model ScheduledJob {
   channelNumbers Int[]         @default([])
   measurements   Measurement[]
 
+  // una fila por punto de rejilla: el scheduler crea la siguiente repetición / los missed sin duplicar
+  @@unique([taskId, seriesStartAt, executionIndex])
   @@index([taskId, startAt(sort: Asc)], map: "idx_scheduled_jobs_task_start")
   @@index([status, startAt])
   @@map("scheduled_jobs")

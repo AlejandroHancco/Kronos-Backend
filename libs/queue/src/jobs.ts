@@ -12,6 +12,10 @@ export interface MeasurementJobData {
   /** Presentes solo cuando la medición proviene de un ScheduledJob */
   scheduledJobId?: number;
   executionIndex?: number;
+  /** Inicio planificado (ISO) de esta ocurrencia en la rejilla de la serie */
+  plannedAt?: string;
+  /** Minutos de retraso admitidos (más la gracia fija de 30 s) */
+  toleranceMinutes?: number;
 }
 
 /** Payloads de los jobs de la cola 'device-ops' (la API los publica, el worker los ejecuta) */

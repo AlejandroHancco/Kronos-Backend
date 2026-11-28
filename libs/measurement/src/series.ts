@@ -200,3 +200,14 @@ export function suggestStart(
   }
   return null;
 }
+
+/** Gracia fija (s) que se suma a toda tolerancia: "tolerancia 0" significa "dentro de 30 s". */
+export const SCHEDULE_GRACE_SECONDS = 30;
+
+/** Fin de la ventana en que una ocurrencia aún puede empezar: inicio planificado + tolerancia + gracia. */
+export function toleranceWindowEnd(plannedAt: Date, toleranceMinutes: number): Date {
+  return new Date(plannedAt.getTime() + toleranceMinutes * MS_PER_MIN + SCHEDULE_GRACE_SECONDS * 1000);
+}
+
+/** Motivo por el que una ocurrencia programada no se midió (ScheduledJob.missReason). */
+export type MissReason = 'device_offline' | 'device_busy' | 'no_slot' | 'tolerance_exceeded' | 'system_down';

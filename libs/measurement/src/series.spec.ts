@@ -1,4 +1,5 @@
 import {
+  SCHEDULE_GRACE_SECONDS,
   SeriesWindow,
   firstOverlap,
   nextReservationStart,
@@ -7,6 +8,7 @@ import {
   reservedSecondsFor,
   selfOverlaps,
   suggestStart,
+  toleranceWindowEnd,
 } from './series';
 
 const MIN = 60_000;
@@ -238,5 +240,14 @@ describe('suggestStart con salto (jump-ahead) contra búsqueda ingenua', () => {
       expect(suggestStart(candidate, others, from, step, horizon)).toEqual(expected);
     }
     expect(found).toBeGreaterThan(50); // la muestra ejercita tanto huecos como horizontes agotados
+  });
+});
+
+describe('toleranceWindowEnd', () => {
+  it('inicio planificado + tolerancia + 30 s de gracia fija', () => {
+    expect(SCHEDULE_GRACE_SECONDS).toBe(30);
+    const planned = new Date('2026-10-21T12:00:00Z');
+    expect(toleranceWindowEnd(planned, 5)).toEqual(new Date('2026-10-21T12:05:30Z'));
+    expect(toleranceWindowEnd(planned, 0)).toEqual(new Date('2026-10-21T12:00:30Z'));
   });
 });
