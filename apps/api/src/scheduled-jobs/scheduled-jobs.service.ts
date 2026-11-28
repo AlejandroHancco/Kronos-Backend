@@ -6,6 +6,9 @@ import { ExperimentConfigService } from '@app/experiments';
 import { SeriesConflictPair, SeriesReservationsService } from '@app/measurement';
 import { CreateScheduledJobDto } from './dto/create-scheduled-job.dto';
 
+/** Margen para el reloj del cliente y la latencia: un inicio hasta 30 s en el pasado se acepta. */
+const START_AT_PAST_GRACE_MS = 30_000;
+
 @Injectable()
 export class ScheduledJobsService {
   constructor(
@@ -17,6 +20,11 @@ export class ScheduledJobsService {
 
   async create(createScheduledJobDto: CreateScheduledJobDto, userId: string) {
     const { taskId, toleranceMinutes = 5, ...data } = createScheduledJobDto;
+
+    // un inicio pasado se perdería (o sus primeros puntos) nada más crearse
+    if (new Date(data.startAt).getTime() < Date.now() - START_AT_PAST_GRACE_MS) {
+      throw new BadRequestException('La hora de inicio ya pasó');
+    }
 
     // Verificar que la tarea existe Y pertenece al equipo del usuario
     await this.teamScope.assertTaskInTeam(userId, taskId);
@@ -52,7 +60,7 @@ export class ScheduledJobsService {
     } catch (error) {
       // índice único (taskId, seriesStartAt, executionIndex): la misma serie enviada dos veces a la vez
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-        throw new ConflictException('Ya existe una serie idéntica');
+        throw new ConflictException('Ya existe una serie de esta tarea con la misma hora de inicio');
       }
       throw error;
     }

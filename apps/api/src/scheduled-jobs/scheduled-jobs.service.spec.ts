@@ -45,6 +45,23 @@ const dto = (over: Record<string, unknown> = {}) => ({
 }) as any;
 
 describe('ScheduledJobsService.create (admisión de series)', () => {
+  beforeEach(() => jest.useFakeTimers({ now: t0, doNotFake: ['nextTick', 'setImmediate'] }));
+  afterEach(() => jest.useRealTimers());
+
+  it('rechaza con 400 un inicio más de 30 s en el pasado, sin crear nada', async () => {
+    const { service, prisma } = setup();
+    await expect(service.create(dto({ taskId: 3, startAt: new Date(t0.getTime() - 31_000).toISOString() }), 'u1')).rejects.toThrow(
+      new BadRequestException('La hora de inicio ya pasó'),
+    );
+    expect(prisma.scheduledJob.create).not.toHaveBeenCalled();
+  });
+
+  it('acepta un inicio hasta 30 s en el pasado (reloj del cliente / latencia)', async () => {
+    const { service, prisma } = setup();
+    await service.create(dto({ taskId: 3, startAt: new Date(t0.getTime() - 30_000).toISOString() }), 'u1');
+    expect(prisma.scheduledJob.create).toHaveBeenCalledTimes(1);
+  });
+
   it('rechaza con 409 una serie que choca en el mismo equipo, con suggestedStartAt', async () => {
     const { service, prisma } = setup();
     const err = await service.create(dto(), 'u1').catch((e) => e);
@@ -97,7 +114,9 @@ describe('ScheduledJobsService.create (admisión de series)', () => {
     prisma.scheduledJob.create.mockRejectedValueOnce(
       new Prisma.PrismaClientKnownRequestError('Unique constraint failed', { code: 'P2002', clientVersion: 'test' }),
     );
-    await expect(service.create(dto({ taskId: 3 }), 'u1')).rejects.toThrow(new ConflictException('Ya existe una serie idéntica'));
+    await expect(service.create(dto({ taskId: 3 }), 'u1')).rejects.toThrow(
+      new ConflictException('Ya existe una serie de esta tarea con la misma hora de inicio'),
+    );
   });
 
   it('otros errores de la BD se propagan tal cual', async () => {
