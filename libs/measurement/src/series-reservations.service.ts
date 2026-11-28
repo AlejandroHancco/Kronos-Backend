@@ -107,10 +107,24 @@ export class SeriesReservationsService {
   async seriesForDevices(deviceIds: string[], excludeJobIds: number[] = [], projectId?: string): Promise<ReservedSeries[]> {
     if (deviceIds.length === 0) return [];
     const wanted = new Set(deviceIds);
-    const all = await this.pendingSeries(excludeJobIds, projectId);
+    const all = await this.chainsWithDevices('pending', excludeJobIds, projectId);
     return all
       .filter((s) => s.devices.some((d) => wanted.has(d)))
       .map(({ devices: _d, projectId: _p, ...s }) => s);
+  }
+
+  /**
+   * Una ocurrencia por fila 'running' (publicada en la cola, empezada o no) cuya tarea usa alguno
+   * de `deviceIds`: solo su punto (firstIndex = lastIndex = executionIndex); sus siguientes puntos
+   * están en el pending de la cadena (ver seriesForDevices).
+   */
+  async runningForDevices(deviceIds: string[], excludeJobIds: number[] = [], projectId?: string): Promise<ReservedSeries[]> {
+    if (deviceIds.length === 0) return [];
+    const wanted = new Set(deviceIds);
+    const all = await this.chainsWithDevices('running', excludeJobIds, projectId);
+    return all
+      .filter((s) => s.devices.some((d) => wanted.has(d)))
+      .map(({ devices: _d, projectId: _p, ...s }) => ({ ...s, lastIndex: s.firstIndex }));
   }
 
   /** Próximo inicio de reserva (estrictamente posterior a `after`) en los dispositivos de la tarea, de su proyecto; null si no hay. */
@@ -214,7 +228,7 @@ export class SeriesReservationsService {
 
   /** Choques ya existentes entre cadenas pendientes que comparten dispositivo (p. ej. creadas antes de la admisión). */
   async findConflicts(): Promise<SeriesConflictPair[]> {
-    const all = await this.pendingSeries([]);
+    const all = await this.chainsWithDevices('pending', []);
     const pairs: SeriesConflictPair[] = [];
     for (let i = 0; i < all.length; i++) {
       const a = all[i];
@@ -263,14 +277,15 @@ export class SeriesReservationsService {
     return rows.map((r) => Math.max(0, (r.finishedAt!.getTime() - r.startedAt!.getTime()) / 1000));
   }
 
-  /** Cadenas pendientes con los dispositivos de su tarea (las tareas sin preferencia no ocupan nada). */
-  private async pendingSeries(
+  /** Cadenas en `status` con los dispositivos de su tarea (las tareas sin preferencia no ocupan nada). */
+  private async chainsWithDevices(
+    status: 'pending' | 'running',
     excludeJobIds: number[],
     projectId?: string,
   ): Promise<Array<ReservedSeries & { devices: string[]; projectId: string }>> {
     const jobs = await this.prisma.scheduledJob.findMany({
       where: {
-        status: 'pending',
+        status,
         ...(excludeJobIds.length ? { id: { notIn: excludeJobIds } } : {}),
         ...(projectId ? { task: { projectId } } : {}),
       },

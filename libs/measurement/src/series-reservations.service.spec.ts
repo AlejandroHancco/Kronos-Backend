@@ -34,6 +34,7 @@ const job = (over: Partial<JobRow>): JobRow => ({
 /** prisma simulado: filtra jobs pendientes por status/taskId/id notIn como lo haría la BD. */
 function setup(opts: {
   pending?: JobRow[];
+  running?: JobRow[];
   prefs?: Array<{ taskId: number; sensorDeviceId: string; channelSelectorDeviceId: string | null }>;
   completed?: Array<{ startedAt: Date; finishedAt: Date }>;
   resolved?: any;
@@ -45,7 +46,7 @@ function setup(opts: {
       findMany: jest.fn(async (args: any) => {
         const w = args.where;
         if (w.status === 'completed') return opts.completed ?? [];
-        return pending
+        return (w.status === 'running' ? opts.running ?? [] : pending)
           .map((j) => ({ ...j, task: { projectId: 'P1', ...j.task } }))
           .filter(
             (j) =>
@@ -74,6 +75,27 @@ describe('SeriesReservationsService.devicesOfTask', () => {
     expect(prisma.taskPreference.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({ where: { taskId: 1 }, orderBy: { createdAt: 'desc' } }),
     );
+  });
+});
+
+describe('SeriesReservationsService.runningForDevices', () => {
+  it('una ocurrencia por fila running (solo su punto), filtrada por dispositivo y proyecto', async () => {
+    const { service, prisma } = setup({
+      pending: [job({ id: 10, taskId: 1 })],
+      running: [job({ id: 30, taskId: 1, executionIndex: 3, repeatCount: 8, task: { name: 'T1' } }), job({ id: 31, taskId: 2 })],
+      prefs: [
+        { taskId: 1, sensorDeviceId: 'A', channelSelectorDeviceId: null },
+        { taskId: 2, sensorDeviceId: 'B', channelSelectorDeviceId: null },
+      ],
+    });
+    expect(await service.runningForDevices(['A'], [], 'P1')).toEqual([
+      { jobId: 30, taskId: 1, taskName: 'T1', label: null, seriesStartAt: t0, intervalMinutes: 30, firstIndex: 3, lastIndex: 3, reservedSeconds: 600 },
+    ]);
+    expect(prisma.scheduledJob.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { status: 'running', task: { projectId: 'P1' } } }),
+    );
+    expect(await service.runningForDevices(['A'], [30])).toEqual([]);
+    expect(await service.runningForDevices([])).toEqual([]);
   });
 });
 

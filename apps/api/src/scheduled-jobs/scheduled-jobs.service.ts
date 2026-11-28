@@ -1,4 +1,5 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '@app/database';
 import { TeamScopeService } from '@app/common';
 import { ExperimentConfigService } from '@app/experiments';
@@ -36,17 +37,25 @@ export class ScheduledJobsService {
       (await this.reservations.projectOfTask(taskId)) ?? undefined,
     );
 
-    return this.prisma.scheduledJob.create({
-      data: {
-        ...data,
-        seriesStartAt: data.startAt,
-        toleranceMinutes,
-        reservedSeconds,
-        taskId,
-        createdBy: userId,
-        status: 'pending',
-      },
-    });
+    try {
+      return await this.prisma.scheduledJob.create({
+        data: {
+          ...data,
+          seriesStartAt: data.startAt,
+          toleranceMinutes,
+          reservedSeconds,
+          taskId,
+          createdBy: userId,
+          status: 'pending',
+        },
+      });
+    } catch (error) {
+      // índice único (taskId, seriesStartAt, executionIndex): la misma serie enviada dos veces a la vez
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new ConflictException('Ya existe una serie idéntica');
+      }
+      throw error;
+    }
   }
 
   async findAll(userId: string) {

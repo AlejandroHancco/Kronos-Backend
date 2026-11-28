@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { SeriesReservationsService } from '@app/measurement';
 import { ScheduledJobsService } from './scheduled-jobs.service';
 
@@ -89,6 +90,20 @@ describe('ScheduledJobsService.create (admisión de series)', () => {
     });
     await service.create(dto({ taskId: 3, toleranceMinutes: 12 }), 'u1');
     expect(prisma.scheduledJob.create).toHaveBeenLastCalledWith({ data: expect.objectContaining({ toleranceMinutes: 12 }) });
+  });
+
+  it('serie idéntica creada a la vez (P2002 del índice único de rejilla): 409', async () => {
+    const { service, prisma } = setup();
+    prisma.scheduledJob.create.mockRejectedValueOnce(
+      new Prisma.PrismaClientKnownRequestError('Unique constraint failed', { code: 'P2002', clientVersion: 'test' }),
+    );
+    await expect(service.create(dto({ taskId: 3 }), 'u1')).rejects.toThrow(new ConflictException('Ya existe una serie idéntica'));
+  });
+
+  it('otros errores de la BD se propagan tal cual', async () => {
+    const { service, prisma } = setup();
+    prisma.scheduledJob.create.mockRejectedValueOnce(new Error('db down'));
+    await expect(service.create(dto({ taskId: 3 }), 'u1')).rejects.toThrow('db down');
   });
 });
 

@@ -29,6 +29,8 @@ const ENQUEUE_LEAD_MS = 30_000;
  * (scheduler caído o atascado): se registra system_down y se recupera la rejilla.
  */
 const SYSTEM_DOWN_AFTER_MS = 2 * TICK_MS;
+/** Filas por createMany al recuperar una caída larga. */
+const CATCH_UP_CHUNK = 1000;
 
 /** Campos de una fila de la cadena que el scheduler necesita. */
 type ChainJob = Pick<
@@ -62,7 +64,10 @@ type Estimate = { resolved: ResolvedExperiment; ranges: SweepRange[]; estimatedS
  *    now + intervalo), al publicar o al perder la actual; una fila por punto (índice único).
  *  - Tras una caída, los puntos cuya ventana ya pasó quedan 'missed' (system_down) y la serie sigue
  *    en el primer punto con ventana abierta.
- *  - Errores de configuración (sin canales, sin equipo, rangos inválidos) ⇒ 'failed', como antes.
+ *  - Errores de configuración (sin canales, sin equipo, rangos inválidos) ⇒ 'failed'; la serie sigue
+ *    (cada punto posterior tiene su propia fila).
+ *  - Reaper: un 'running' cuya ventana cerró y que no tiene job Bull (caída entre reclamarlo y
+ *    publicarlo) pasa a 'missed' (system_down).
  */
 @Injectable()
 export class SchedulerService {
@@ -106,6 +111,8 @@ export class SchedulerService {
   private async tick(): Promise<void> {
     const now = new Date();
 
+    await this.reapOrphans(now);
+
     const candidates = await this.prisma.scheduledJob.findMany({
       where: { status: 'pending', startAt: { lte: new Date(now.getTime() + ENQUEUE_LEAD_MS) } },
       orderBy: { startAt: 'asc' },
@@ -125,6 +132,20 @@ export class SchedulerService {
     }
   }
 
+  /** 'running' con la ventana cerrada y sin job Bull: nunca llegó a la cola, se registra system_down. */
+  private async reapOrphans(now: Date): Promise<void> {
+    const running = await this.prisma.scheduledJob.findMany({ where: { status: 'running', startAt: { lte: now } } });
+    for (const row of running) {
+      if (now <= toleranceWindowEnd(row.startAt, row.toleranceMinutes)) continue;
+      try {
+        if (await this.measurementQueue.getJob(`scheduled-${row.id}`)) continue; // en la cola o midiendo
+        await this.missJob(row, 'system_down');
+      } catch (error) {
+        this.logger.error(`Job ${row.id}: error al revisar running huérfano: ${error.message}`);
+      }
+    }
+  }
+
   private async processJob(job: ChainJob, now: Date, busyDevices: Set<string>): Promise<void> {
     const windowEnd = toleranceWindowEnd(job.startAt, job.toleranceMinutes);
 
@@ -138,7 +159,7 @@ export class SchedulerService {
     }
 
     if (job.channelNumbers.length === 0) {
-      await this.failJob(job.id, 'no tiene canales seleccionados');
+      await this.failJob(job, 'no tiene canales seleccionados');
       return;
     }
 
@@ -148,11 +169,11 @@ export class SchedulerService {
     try {
       estimate = await this.resolveWithEstimate(job.taskId, job.channelNumbers.length);
     } catch (error) {
-      await this.failJob(job.id, error.message);
+      await this.failJob(job, error.message);
       return;
     }
     if (!estimate) {
-      await this.failJob(job.id, 'la tarea no tiene un equipo de medición asignado');
+      await this.failJob(job, 'la tarea no tiene un equipo de medición asignado');
       return;
     }
 
@@ -188,7 +209,11 @@ export class SchedulerService {
     offline: boolean,
   ): Promise<MissReason | null> {
     const projectId = await this.reservations.projectOfTask(job.taskId);
-    const series = await this.reservations.seriesForDevices(devices, [job.id], projectId ?? undefined);
+    // cadenas pendientes + ocurrencias ya publicadas (running) que aún no empezaron
+    const series = [
+      ...(await this.reservations.seriesForDevices(devices, [job.id], projectId ?? undefined)),
+      ...(await this.reservations.runningForDevices(devices, [job.id], projectId ?? undefined)),
+    ];
     // reservas que empiezan después del inicio planificado: si alguna ya empezó, el hueco se perdió
     const next = nextReservationStart(series, job.startAt);
     const slotCloseAt = next ? next.getTime() - estimatedSeconds * 1000 : Infinity;
@@ -200,7 +225,10 @@ export class SchedulerService {
     return busy ? 'device_busy' : 'tolerance_exceeded';
   }
 
-  /** Marca 'running', publica el job Bull diferido y crea la siguiente repetición. */
+  /**
+   * Marca 'running', crea la siguiente repetición (antes de publicar: una caída entre ambos no corta
+   * la serie; el reaper resuelve el running huérfano) y publica el job Bull diferido.
+   */
   private async enqueue(job: ChainJob, now: Date, estimate: Estimate, devices: string[], busyDevices: Set<string>) {
     const claimed = await this.prisma.scheduledJob.updateMany({
       where: { id: job.id, status: 'pending' },
@@ -225,6 +253,20 @@ export class SchedulerService {
     };
     const delay = Math.max(0, job.startAt.getTime() - now.getTime());
 
+    await this.createNext(job);
+
+    // jobId determinista: uno terminado (completed/failed) bloquearía el add; uno vivo ya basta
+    const existing = await this.measurementQueue.getJob(jobId);
+    if (existing) {
+      const state = await existing.getState();
+      if (state === 'completed' || state === 'failed') {
+        await existing.remove();
+      } else {
+        this.logger.log(`Job ${job.id} ya estaba en la cola (${state}); no se publica otra vez`);
+        return;
+      }
+    }
+
     try {
       await this.measurementQueue.add('execute', payload, {
         jobId, // determinista: Bull ignora un segundo add del mismo job
@@ -247,8 +289,6 @@ export class SchedulerService {
     this.logger.log(`Job ${job.id} publicado (execution ${job.executionIndex}, empieza en ${delay} ms)`);
 
     this.realtime.jobStatus(job.createdBy, { jobId, taskId: job.taskId, status: 'queued' });
-
-    await this.createNext(job);
   }
 
   /**
@@ -271,8 +311,8 @@ export class SchedulerService {
         break;
       }
     }
-    if (missed.length > 0) {
-      await this.prisma.scheduledJob.createMany({ data: missed, skipDuplicates: true });
+    for (let i = 0; i < missed.length; i += CATCH_UP_CHUNK) {
+      await this.prisma.scheduledJob.createMany({ data: missed.slice(i, i + CATCH_UP_CHUNK), skipDuplicates: true });
     }
     this.logger.warn(
       `Job ${job.id}: ${missed.length + 1} punto(s) perdido(s) por caída del scheduler (system_down)` +
@@ -354,12 +394,16 @@ export class SchedulerService {
     return { resolved, ranges, estimatedSeconds };
   }
 
-  /** Marca un job pendiente como 'failed' registrando el motivo. */
-  private async failJob(jobId: number, reason: string) {
-    this.logger.warn(`Job ${jobId} marcado como failed: ${reason}`);
+  /**
+   * Marca un job pendiente como 'failed' registrando el motivo. La serie no termina: el siguiente
+   * punto de la rejilla tiene su propia fila (falla también o corre si ya se corrigió la configuración).
+   */
+  private async failJob(job: ChainJob, reason: string) {
+    this.logger.warn(`Job ${job.id} marcado como failed: ${reason}`);
     await this.prisma.scheduledJob.update({
-      where: { id: jobId },
+      where: { id: job.id },
       data: { status: 'failed' },
     });
+    await this.createNext(job);
   }
 }
