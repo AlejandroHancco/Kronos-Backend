@@ -61,6 +61,8 @@ interface SetupOpts {
   running?: any[];
   /** jobs Bull existentes por jobId: estado */
   bull?: Record<string, string>;
+  /** ids de ScheduledJob con alguna Measurement guardada */
+  measured?: number[];
 }
 
 /**
@@ -68,7 +70,7 @@ interface SetupOpts {
  * Se usa el assertRanges real y la estimación de @app/measurement.
  */
 function setup(dueJobs: any[], resolveFor: (taskId: number) => unknown, opts: SetupOpts = {}) {
-  const { leader = true, busy = [], offline = [], others = [], runningOthers = [], running = [], bull = {} } = opts;
+  const { leader = true, busy = [], offline = [], others = [], runningOthers = [], running = [], bull = {}, measured = [] } = opts;
   let nextId = 100;
   const prisma = {
     scheduledJob: {
@@ -91,6 +93,9 @@ function setup(dueJobs: any[], resolveFor: (taskId: number) => unknown, opts: Se
       findMany: jest.fn(async (args: any) =>
         (args.where.id.in as string[]).map((id) => ({ id, status: offline.includes(id) ? 'offline' : 'online' })),
       ),
+    },
+    measurement: {
+      findFirst: jest.fn(async (args: any) => (measured.includes(args.where.scheduledJobId) ? { id: 1 } : null)),
     },
   };
   const experimentConfig = new ExperimentConfigService(null as any, null as any);
@@ -488,6 +493,44 @@ describe('SchedulerService', () => {
     it('running con ventana cerrada pero con job Bull (midiendo): no se toca', async () => {
       const { service, prisma } = setup([], () => null, { running: [job(expiredRunning)], bull: { 'scheduled-40': 'active' } });
       await service.processPendingJobs();
+      expect(missedUpdate(prisma, 40)).toBeUndefined();
+    });
+
+    const condUpdate = (prisma: any, status: string) =>
+      prisma.scheduledJob.updateMany.mock.calls.map((c: any[]) => c[0]).find((a: any) => a.where.id === 40 && a.data.status === status);
+
+    it.each(['completed', 'failed'])(
+      'job Bull %s, fila aún running y con medición guardada (se perdió la escritura): completed',
+      async (state) => {
+        const { service, prisma } = setup([], () => null, {
+          running: [job(expiredRunning)],
+          bull: { 'scheduled-40': state },
+          measured: [40],
+        });
+        await service.processPendingJobs();
+        expect(prisma.measurement.findFirst).toHaveBeenCalledWith({ where: { scheduledJobId: 40 }, select: { id: true } });
+        expect(condUpdate(prisma, 'completed')).toEqual({ where: { id: 40, status: 'running' }, data: { status: 'completed' } });
+        expect(missedUpdate(prisma, 40)).toBeUndefined();
+      },
+    );
+
+    it('job Bull completed, fila running y sin medición: missed system_down', async () => {
+      const { service, prisma } = setup([], () => null, { running: [job(expiredRunning)], bull: { 'scheduled-40': 'completed' } });
+      await service.processPendingJobs();
+      expect(missedUpdate(prisma, 40)?.data).toEqual({ status: 'missed', missReason: 'system_down' });
+    });
+
+    it('job Bull failed, fila running y sin medición: failed (condicional a running)', async () => {
+      const { service, prisma } = setup([], () => null, { running: [job(expiredRunning)], bull: { 'scheduled-40': 'failed' } });
+      await service.processPendingJobs();
+      expect(condUpdate(prisma, 'failed')).toEqual({ where: { id: 40, status: 'running' }, data: { status: 'failed' } });
+      expect(missedUpdate(prisma, 40)).toBeUndefined();
+    });
+
+    it('sin job Bull (eliminado) pero con medición guardada: completed, no system_down', async () => {
+      const { service, prisma } = setup([], () => null, { running: [job(expiredRunning)], measured: [40] });
+      await service.processPendingJobs();
+      expect(condUpdate(prisma, 'completed')).toBeDefined();
       expect(missedUpdate(prisma, 40)).toBeUndefined();
     });
 

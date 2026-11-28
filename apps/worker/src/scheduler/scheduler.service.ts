@@ -132,18 +132,38 @@ export class SchedulerService {
     }
   }
 
-  /** 'running' con la ventana cerrada y sin job Bull: nunca llegó a la cola, se registra system_down. */
+  /**
+   * 'running' con la ventana cerrada cuyo job Bull ya no está vivo (no existe, o terminó completed /
+   * failed sin que la escritura del processor llegara a la fila):
+   *  - con una Measurement guardada para el punto ⇒ 'completed';
+   *  - job Bull failed ⇒ 'failed';
+   *  - si no (nunca llegó a la cola o terminó sin medir) ⇒ 'missed' system_down.
+   * Todas condicionales a 'running'. Un job en la cola o midiendo no se toca.
+   */
   private async reapOrphans(now: Date): Promise<void> {
     const running = await this.prisma.scheduledJob.findMany({ where: { status: 'running', startAt: { lte: now } } });
     for (const row of running) {
       if (now <= toleranceWindowEnd(row.startAt, row.toleranceMinutes)) continue;
       try {
-        if (await this.measurementQueue.getJob(`scheduled-${row.id}`)) continue; // en la cola o midiendo
-        await this.missJob(row, 'system_down');
+        const bullJob = await this.measurementQueue.getJob(`scheduled-${row.id}`);
+        const state = bullJob ? await bullJob.getState() : null;
+        if (bullJob && state !== 'completed' && state !== 'failed') continue; // en la cola o midiendo
+        await this.resolveStale(row, state);
       } catch (error) {
         this.logger.error(`Job ${row.id}: error al revisar running huérfano: ${error.message}`);
       }
     }
+  }
+
+  private async resolveStale(row: ChainJob, bullState: string | null): Promise<void> {
+    const measured = await this.prisma.measurement.findFirst({ where: { scheduledJobId: row.id }, select: { id: true } });
+    const status = measured ? 'completed' : bullState === 'failed' ? 'failed' : null;
+    if (!status) {
+      await this.missJob(row, 'system_down');
+      return;
+    }
+    const updated = await this.prisma.scheduledJob.updateMany({ where: { id: row.id, status: 'running' }, data: { status } });
+    if (updated.count > 0) this.logger.warn(`Job ${row.id}: running sin job vivo resuelto como ${status}`);
   }
 
   private async processJob(job: ChainJob, now: Date, busyDevices: Set<string>): Promise<void> {
