@@ -40,7 +40,7 @@ const rowSelect = {
  *    esperando un equipo ocupado nunca ocupe el turno de un programado. La espera del lock se
  *    limita a lo que queda de la ventana (inicio planificado + tolerancia + 30 s); con el lock
  *    tomado se vuelve a comprobar la ventana y el hueco (now + estimación ≤ próxima reserva de sus
- *    dispositivos, sin contar su propia cadena). Si algo falla el punto queda 'missed' (o 'failed'
+ *    dispositivos, incluido el siguiente punto de su propia cadena). Si algo falla el punto queda 'missed' (o 'failed'
  *    si un intento anterior ya había empezado a medir) y el job termina sin lanzar (Bull no
  *    reintenta). Toda escritura de estado es condicional a 'running': nunca pisa un punto que el
  *    reaper del scheduler ya resolvió.
@@ -202,7 +202,7 @@ export class MeasurementJobRunner {
     }
   }
 
-  /** now + estimación ≤ próxima reserva (posterior al inicio planificado) de sus dispositivos, sin su propia cadena. */
+  /** now + estimación ≤ próxima reserva (posterior al inicio planificado) de sus dispositivos, incluido el siguiente punto de su propia cadena. */
   private async slotFree(
     row: ScheduledRow,
     devices: string[],
@@ -212,12 +212,12 @@ export class MeasurementJobRunner {
   ): Promise<boolean> {
     if (devices.length === 0) return true;
     const projectId = (await this.reservations.projectOfTask(row.taskId)) ?? undefined;
-    const ownChain = (s: { taskId: number; seriesStartAt: Date }) =>
-      s.taskId === row.taskId && s.seriesStartAt.getTime() === row.seriesStartAt.getTime();
+    // solo se excluye la propia fila: el siguiente punto de su cadena (pending k+1) también limita,
+    // un punto atrasado nunca retrasa al siguiente de su serie
     const series = [
       ...(await this.reservations.seriesForDevices(devices, [row.id], projectId)),
       ...(await this.reservations.runningForDevices(devices, [row.id], projectId)),
-    ].filter((s) => !ownChain(s));
+    ];
     const next = nextReservationStart(series, plannedAt);
     return !next || now.getTime() + estimatedSeconds * 1000 <= next.getTime();
   }

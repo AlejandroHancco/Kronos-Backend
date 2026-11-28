@@ -381,11 +381,34 @@ describe('MeasurementProcessor: jobs programados (ventana y hueco)', () => {
     expect(ctx.executor.measureTask).toHaveBeenCalledTimes(1);
   });
 
-  it('la propia cadena (su siguiente punto pending, otra fila) no limita el hueco', async () => {
-    jest.setSystemTime(at(2 * MIN));
-    const own = { jobId: 10, taskId: 5, seriesStartAt: NOW, intervalMinutes: 2.5, firstIndex: 2, lastIndex: 3, reservedSeconds: 70 };
-    const ctx = setup(pref, passLock(), { row: row(), series: [own] });
-    await ctx.processor.handleExecute(scheduledJob());
+  it('el siguiente punto de su propia cadena limita: lock a planned + 5 min con estimación > intervalo − 5 min ⇒ missed no_slot y k+1 a su hora', async () => {
+    // intervalo 10 min; k+1 (pending, otra fila) a NOW + 10 min; estimación 6 min > 10 − 5
+    const own = { jobId: 10, taskId: 5, seriesStartAt: NOW, intervalMinutes: 10, firstIndex: 2, lastIndex: 3, reservedSeconds: 400 };
+    const lockService = {
+      withDeviceLocks: jest.fn(async (_ids: string[], fn: () => Promise<unknown>) => {
+        jest.setSystemTime(at(5 * MIN)); // el lock se libera a planned + 5 min (dentro de la ventana)
+        return fn();
+      }),
+    };
+    const ctx = setup(pref, lockService, { row: row(), series: [own] });
+    await expect(ctx.processor.handleExecute(scheduledJob({ estimatedSeconds: 360 }))).resolves.toBeNull();
+    expect(ctx.reservations.seriesForDevices).toHaveBeenCalledWith(['S'], [9], 'proj-1');
+    expect(ctx.scheduler.markMissed).toHaveBeenCalledWith(9, 'no_slot');
+    // no midió ni tomó startedAt: el equipo queda libre para que k+1 empiece a NOW + 10 min
+    expect(ctx.executor.measureTask).not.toHaveBeenCalled();
+    expect(condUpdates(ctx.prisma)).toEqual([]);
+  });
+
+  it('el siguiente punto de su propia cadena: si cabe antes de k+1, mide', async () => {
+    const own = { jobId: 10, taskId: 5, seriesStartAt: NOW, intervalMinutes: 10, firstIndex: 2, lastIndex: 3, reservedSeconds: 400 };
+    const lockService = {
+      withDeviceLocks: jest.fn(async (_ids: string[], fn: () => Promise<unknown>) => {
+        jest.setSystemTime(at(5 * MIN));
+        return fn();
+      }),
+    };
+    const ctx = setup(pref, lockService, { row: row(), series: [own] });
+    await ctx.processor.handleExecute(scheduledJob({ estimatedSeconds: 300 }));
     expect(ctx.executor.measureTask).toHaveBeenCalledTimes(1);
   });
 
