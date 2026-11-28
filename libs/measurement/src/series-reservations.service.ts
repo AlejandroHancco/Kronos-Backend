@@ -127,13 +127,27 @@ export class SeriesReservationsService {
       .map(({ devices: _d, projectId: _p, ...s }) => ({ ...s, lastIndex: s.firstIndex }));
   }
 
+  /**
+   * Todas las reservas de `deviceIds`: cadenas pendientes + filas running (publicadas en la cola o
+   * midiendo), como las ve el worker. Sin las running, una admisión manual, un cambio de
+   * configuración o una serie nueva no verían un punto ya encolado.
+   */
+  async reservationsForDevices(deviceIds: string[], excludeJobIds: number[] = [], projectId?: string): Promise<ReservedSeries[]> {
+    if (deviceIds.length === 0) return [];
+    const [pending, running] = await Promise.all([
+      this.seriesForDevices(deviceIds, excludeJobIds, projectId),
+      this.runningForDevices(deviceIds, excludeJobIds, projectId),
+    ]);
+    return [...pending, ...running];
+  }
+
   /** Próximo inicio de reserva (estrictamente posterior a `after`) en los dispositivos de la tarea, de su proyecto; null si no hay. */
   async nextReservationForTask(taskId: number, after: Date): Promise<Date | null> {
     const devices = await this.devicesOfTask(taskId);
     if (devices.length === 0) return null;
     const projectId = await this.projectOfTask(taskId);
     if (!projectId) return null;
-    return nextReservationStart(await this.seriesForDevices(devices, [], projectId), after);
+    return nextReservationStart(await this.reservationsForDevices(devices, [], projectId), after);
   }
 
   /** Ocurrencia de los dispositivos de la tarea en curso ahora (o que empieza en ≤ `withinSeconds`), con su inicio y fin; null si no hay. */
@@ -142,12 +156,12 @@ export class SeriesReservationsService {
     if (devices.length === 0) return null;
     const projectId = await this.projectOfTask(taskId);
     if (!projectId) return null;
-    return reservationNearWindow(await this.seriesForDevices(devices, [], projectId), now, withinSeconds);
+    return reservationNearWindow(await this.reservationsForDevices(devices, [], projectId), now, withinSeconds);
   }
 
   /** Inicio de una reserva del dispositivo en curso ahora o que empieza en ≤ `leadSeconds`; null si no hay. */
   async reservationNearDevice(deviceId: string, projectId: string, now: Date, leadSeconds: number): Promise<Date | null> {
-    return reservationNear(await this.seriesForDevices([deviceId], [], projectId), now, leadSeconds);
+    return reservationNear(await this.reservationsForDevices([deviceId], [], projectId), now, leadSeconds);
   }
 
   /**
@@ -156,11 +170,7 @@ export class SeriesReservationsService {
    */
   async upcomingForDevice(deviceId: string, projectId: string, from: Date, minutes: number): Promise<number> {
     const to = new Date(from.getTime() + minutes * 60_000);
-    const [pending, running] = await Promise.all([
-      this.seriesForDevices([deviceId], [], projectId),
-      this.runningForDevices([deviceId], [], projectId),
-    ]);
-    return countOccurrencesOverlapping([...pending, ...running], from, to);
+    return countOccurrencesOverlapping(await this.reservationsForDevices([deviceId], [], projectId), from, to);
   }
 
   /**
@@ -202,7 +212,7 @@ export class SeriesReservationsService {
 
   /**
    * 400 si la serie se solapa consigo misma; 409 `{ message, conflicts, suggestedStartAt }` si alguna
-   * ocurrencia se solapa con una cadena pendiente que comparte dispositivo.
+   * ocurrencia se solapa con una cadena pendiente o una fila running que comparte dispositivo.
    */
   async assertNoConflict(
     candidate: SeriesWindow,
@@ -211,7 +221,7 @@ export class SeriesReservationsService {
     projectId?: string,
   ): Promise<void> {
     assertNoSelfOverlap(candidate);
-    this.assertAgainst(candidate, await this.seriesForDevices(deviceIds, excludeJobIds, projectId));
+    this.assertAgainst(candidate, await this.reservationsForDevices(deviceIds, excludeJobIds, projectId));
   }
 
   /**
@@ -232,7 +242,8 @@ export class SeriesReservationsService {
     });
     if (own.length === 0) return [];
     const durations = await this.recentDurations(taskId);
-    const others = await this.seriesForDevices(deviceIds, own.map((j) => j.id), own[0].task.projectId);
+    // cadenas pendientes de otras tareas + todas las filas running (también las de esta tarea)
+    const others = await this.reservationsForDevices(deviceIds, own.map((j) => j.id), own[0].task.projectId);
     const candidates: ReservedSeries[] = own.map((j) => ({
       jobId: j.id,
       taskId: j.taskId,

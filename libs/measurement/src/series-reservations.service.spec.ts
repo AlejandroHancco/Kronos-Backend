@@ -341,6 +341,44 @@ describe('SeriesReservationsService.nextReservationForTask / reservationNearDevi
   });
 });
 
+describe('SeriesReservationsService: las filas running también reservan (prisma simulado, sin mockear el servicio)', () => {
+  // punto running (encolado/midiendo) de la tarea 2 a t0 + 10 min, 10 min de reserva; ninguna cadena pendiente
+  const running = [job({ id: 30, taskId: 2, seriesStartAt: at(10), intervalMinutes: null, repeatCount: 1, reservedSeconds: 600, task: { name: 'T2' } })];
+  const prefs = [
+    { taskId: 1, sensorDeviceId: 'A', channelSelectorDeviceId: 'M' },
+    { taskId: 2, sensorDeviceId: 'B', channelSelectorDeviceId: 'M' },
+  ];
+
+  it('reservationNearForTask ve un punto running en curso de otra tarea en el mismo equipo', async () => {
+    const { service, prisma } = setup({ running, prefs });
+    expect(await service.reservationNearForTask(1, at(15))).toEqual({ start: at(10), end: at(20) });
+    expect(await service.reservationNearForTask(1, at(9), 120)).toEqual({ start: at(10), end: at(20) });
+    expect(await service.reservationNearForTask(1, at(21))).toBeNull();
+    expect(prisma.scheduledJob.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ status: 'running' }) }));
+  });
+
+  it('nextReservationForTask y reservationNearDevice también lo ven', async () => {
+    const { service } = setup({ running, prefs });
+    expect(await service.nextReservationForTask(1, at(0))).toEqual(at(10));
+    expect(await service.reservationNearDevice('M', 'P1', at(15), 120)).toEqual(at(10));
+  });
+
+  it('assertNoConflict: una serie nueva que pisa un punto running es 409', async () => {
+    const { service } = setup({ running, prefs });
+    const err = await service
+      .assertNoConflict({ seriesStartAt: at(12), intervalMinutes: null, firstIndex: 1, lastIndex: 1, reservedSeconds: 60 }, ['M'], [], 'P1')
+      .catch((e) => e);
+    expect(err).toBeInstanceOf(ConflictException);
+    expect(err.getResponse().conflicts).toEqual([{ jobId: 30, taskName: 'T2', label: null, at: at(12).toISOString() }]);
+  });
+
+  it('revalidateTask: una cadena pendiente que con la nueva configuración pisa un punto running es 409', async () => {
+    const pending = [job({ id: 10, taskId: 1, seriesStartAt: at(15), intervalMinutes: null, repeatCount: 1 })];
+    const { service } = setup({ pending, running, prefs });
+    await expect(service.revalidateTask(1, ['B'], () => 60)).rejects.toBeInstanceOf(ConflictException);
+  });
+});
+
 describe('SeriesReservationsService.upcomingForDevice', () => {
   it('ocurrencias pendientes y running del dispositivo cuya reserva toca [from, from + minutos)', async () => {
     const { service } = setup({
