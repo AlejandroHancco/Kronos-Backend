@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException, Injectable } from '@nestjs/comm
 import { deviceIdsOf, PrefDevices, PrismaService } from '@app/database';
 import { ExperimentConfigService, toSweepRanges } from '@app/experiments';
 import { estimateSeconds } from './estimate';
-import { SeriesWindow, firstOverlap, nextReservationStart, reservationNear, reservedSecondsFor, selfOverlaps, suggestStart } from './series';
+import { SeriesWindow, firstOverlap, nextReservationStart, reservationNear, reservationNearWindow, reservedSecondsFor, selfOverlaps, suggestStart } from './series';
 
 /** Cadena pendiente (el job pendiente cubre executionIndex..executionIndex+repeatCount−1) con su reserva. */
 export type ReservedSeries = SeriesWindow & { jobId: number; taskId: number; taskName: string; label: string | null };
@@ -120,6 +120,15 @@ export class SeriesReservationsService {
     const projectId = await this.projectOfTask(taskId);
     if (!projectId) return null;
     return nextReservationStart(await this.seriesForDevices(devices, [], projectId), after);
+  }
+
+  /** Ocurrencia de los dispositivos de la tarea en curso ahora (o que empieza en ≤ `withinSeconds`), con su inicio y fin; null si no hay. */
+  async reservationNearForTask(taskId: number, now: Date, withinSeconds = 0): Promise<{ start: Date; end: Date } | null> {
+    const devices = await this.devicesOfTask(taskId);
+    if (devices.length === 0) return null;
+    const projectId = await this.projectOfTask(taskId);
+    if (!projectId) return null;
+    return reservationNearWindow(await this.seriesForDevices(devices, [], projectId), now, withinSeconds);
   }
 
   /** Inicio de una reserva del dispositivo en curso ahora o que empieza en ≤ `leadSeconds`; null si no hay. */

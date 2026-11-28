@@ -143,6 +143,17 @@ export class MeasurementSchedulingService {
     // Regla 2: la medición (cola + estimación, con el mismo margen ×1.2 de las reservas) debe terminar
     // a más tardar cuando empiece la siguiente reserva de sus dispositivos (sensor + selector).
     const now = new Date();
+    // ... y no puede empezar dentro de una reserva que ya está en curso.
+    const running = await this.reservations.reservationNearForTask(taskId, now);
+    if (running) {
+      return {
+        ...base,
+        available: false,
+        reason: 'scheduled_conflict',
+        nextScheduledAt: running.end,
+        message: `El equipo está en una reserva desde las ${limaTime(running.start)} (Lima)`,
+      };
+    }
     const nextReservation = await this.reservations.nextReservationForTask(taskId, now);
     if (nextReservation) {
       const endsAt = now.getTime() + Math.ceil(((backlogSeconds + estimatedSeconds) * 12) / 10) * 1000;

@@ -9,7 +9,7 @@ const hiokiAcq = {
   secondsPerPoint: 0.01,
 };
 
-function setup(opts: { resolved?: any; resolveError?: unknown; nextReservation?: Date } = {}) {
+function setup(opts: { resolved?: any; resolveError?: unknown; nextReservation?: Date; running?: { start: Date; end: Date } } = {}) {
   const prisma = {
     taskPreference: { findFirst: jest.fn(async () => null) },
   };
@@ -21,7 +21,9 @@ function setup(opts: { resolved?: any; resolveError?: unknown; nextReservation?:
     }),
   };
   const measurementQueue = { add: jest.fn(), getJobs: jest.fn(async () => []) };
-  const reservations = { nextReservationForTask: jest.fn(async (): Promise<Date | null> => opts.nextReservation ?? null) };
+  const reservations = { nextReservationForTask: jest.fn(async (): Promise<Date | null> => opts.nextReservation ?? null),
+    reservationNearForTask: jest.fn(async (): Promise<{ start: Date; end: Date } | null> => opts.running ?? null),
+  };
   const service = new MeasurementSchedulingService(
     prisma as any,
     kronosGateway as any,
@@ -104,6 +106,19 @@ describe('MeasurementSchedulingService.checkAvailability (reservas)', () => {
     });
   });
 
+  it('reserva en curso → 409 scheduled_conflict; nextScheduledAt = fin de la ocurrencia', async () => {
+    const running = { start: new Date('2026-11-28T14:55:00.000Z'), end: new Date('2026-11-28T15:05:00.000Z') };
+    const { service, reservations } = setup({ resolved, running });
+    const result = await service.checkAvailability(7, [{ points: 801 }], [1]);
+    expect(reservations.reservationNearForTask).toHaveBeenCalledWith(7, NOW);
+    expect(result).toMatchObject({
+      available: false,
+      reason: 'scheduled_conflict',
+      nextScheduledAt: running.end,
+      message: 'El equipo está en una reserva desde las 09:55 (Lima)',
+    });
+  });
+
   it('termina justo al inicio de la reserva o antes → admitida', async () => {
     const exact = setup({ resolved, nextReservation: new Date('2026-11-28T15:00:12.000Z') });
     expect((await exact.service.checkAvailability(7, [{ points: 801 }], [1])).available).toBe(true);
@@ -135,7 +150,7 @@ describe('MeasurementSchedulingService.requestMeasurement (id del job correlacio
       add: jest.fn(async (_name: string, _data: any, opts: any) => ({ id: opts?.jobId ?? 99 })),
       getJobs: jest.fn(async () => []),
     };
-    const service = new MeasurementSchedulingService(prisma as any, realtime as any, experimentConfig as any, measurementQueue as any, { nextReservationForTask: jest.fn(async () => null) } as any);
+    const service = new MeasurementSchedulingService(prisma as any, realtime as any, experimentConfig as any, measurementQueue as any, { nextReservationForTask: jest.fn(async () => null), reservationNearForTask: jest.fn(async () => null) } as any);
     return { service, realtime, measurementQueue };
   }
 

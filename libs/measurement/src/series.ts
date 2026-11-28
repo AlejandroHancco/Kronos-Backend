@@ -120,8 +120,17 @@ export function nextReservationStart(series: SeriesWindow[], after: Date): Date 
  * después de `now`; la más temprana entre todas las series, o null.
  */
 export function reservationNear(series: SeriesWindow[], now: Date, leadSeconds: number): Date | null {
+  return reservationNearWindow(series, now, leadSeconds)?.start ?? null;
+}
+
+/** Como reservationNear, pero con el inicio y el fin (inicio + reserva) de la ocurrencia hallada. */
+export function reservationNearWindow(
+  series: SeriesWindow[],
+  now: Date,
+  leadSeconds: number,
+): { start: Date; end: Date } | null {
   const nowMs = now.getTime();
-  let best: number | null = null;
+  let best: { start: number; reserved: number } | null = null;
   for (const s of series) {
     const n = normalize(s);
     if (n.count === 0) continue;
@@ -129,9 +138,9 @@ export function reservationNear(series: SeriesWindow[], now: Date, leadSeconds: 
     const [lo, hi] = startsWithin(n, nowMs - n.reserved, nowMs + leadSeconds * 1000 + 1);
     if (lo > hi) continue;
     const start = n.start + lo * n.period;
-    if (best === null || start < best) best = start;
+    if (best === null || start < best.start) best = { start, reserved: n.reserved };
   }
-  return best === null ? null : new Date(best);
+  return best === null ? null : { start: new Date(best.start), end: new Date(best.start + best.reserved) };
 }
 
 /** HH:MM en hora local de Lima (para mensajes al usuario). */

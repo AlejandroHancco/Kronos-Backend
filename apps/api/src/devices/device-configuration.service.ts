@@ -81,7 +81,8 @@ export class DeviceConfigurationService {
     if (crossFieldError) throw new BadRequestException(crossFieldError);
 
     // Escribir en el equipo (lo bloquea) no debe invadir una medición reservada: se rechaza si hay una
-    // reserva en curso o que empieza en los próximos 2 min. Las lecturas (view) no pasan por aquí.
+    // reserva en curso o que empieza en los próximos 2 min. También las escrituras solo persistidas:
+    // cambiar la configuración guardada altera los parámetros de la medición reservada, así que también espera. Las lecturas (view) no pasan por aquí.
     const reserved = await this.reservations.reservationNearDevice(device.id, device.projectId, new Date(), RESERVATION_LEAD_SECONDS);
     if (reserved) {
       throw new ConflictException(`"${device.name}" tiene una medición reservada a las ${limaTime(reserved)}; no se puede configurar ahora`);

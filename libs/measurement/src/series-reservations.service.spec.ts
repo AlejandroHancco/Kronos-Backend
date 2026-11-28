@@ -291,6 +291,14 @@ describe('SeriesReservationsService.nextReservationForTask / reservationNearDevi
     expect(await service.nextReservationForTask(404, at(0))).toBeNull();
   });
 
+  it('reservationNearForTask: ocurrencia en curso con inicio y fin; null fuera o sin tarea', async () => {
+    const { service } = setup({ pending, prefs });
+    expect(await service.reservationNearForTask(1, at(15))).toEqual({ start: at(10), end: at(20) });
+    expect(await service.reservationNearForTask(1, at(9))).toBeNull();
+    expect(await service.reservationNearForTask(1, at(9), 120)).toEqual({ start: at(10), end: at(20) });
+    expect(await service.reservationNearForTask(1, at(20))).toBeNull();
+  });
+
   it('reservationNearDevice: en curso o a ≤ lead segundos; null fuera', async () => {
     const { service } = setup({ pending, prefs });
     expect(await service.reservationNearDevice('M', 'P1', at(8.5), 120)).toEqual(at(10));
