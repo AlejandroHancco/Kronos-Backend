@@ -21,6 +21,8 @@ interface ScheduledOpts {
   row?: any;
   /** dispositivos offline */
   offline?: string[];
+  /** ids de ScheduledJob con una Measurement ya guardada */
+  measured?: number[];
   /** series pendientes / ocurrencias running en los mismos dispositivos */
   series?: any[];
   running?: any[];
@@ -41,6 +43,9 @@ function setup(preference: unknown, lockService: any, opts: ScheduledOpts = {}) 
       update: jest.fn(async () => ({})),
       findUnique: jest.fn(async () => opts.row ?? null),
       updateMany: jest.fn(async () => ({ count: 1 })),
+    },
+    measurement: {
+      findFirst: jest.fn(async (args: any) => (opts.measured?.includes(args.where.scheduledJobId) ? { id: 1 } : null)),
     },
     device: {
       findMany: jest.fn(async (args: any) =>
@@ -447,6 +452,19 @@ describe('MeasurementProcessor: jobs programados (ventana y hueco)', () => {
     expect(ctx.scheduler.markMissed).not.toHaveBeenCalled();
     expect(condUpdates(ctx.prisma)).toEqual([{ where: { id: 9, status: 'running' }, data: { status: 'failed' } }]);
     expect(ctx.executor.measureTask).not.toHaveBeenCalled();
+  });
+
+  it('reintento sin medir pero un intento anterior ya guardó su Measurement: completed (condicional a running), no failed', async () => {
+    jest.setSystemTime(new Date(WINDOW_END + 1));
+    const ctx = setup(pref, passLock(), { row: row({ startedAt: at(5000) }), measured: [9] });
+    await expect(ctx.processor.handleExecute(scheduledJob({}, 1))).resolves.toBeNull();
+    expect(ctx.prisma.measurement.findFirst).toHaveBeenCalledWith({ where: { scheduledJobId: 9 }, select: { id: true } });
+    expect(condUpdates(ctx.prisma)).toEqual([
+      { where: { id: 9, status: 'running' }, data: { status: 'completed', finishedAt: new Date(WINDOW_END + 1) } },
+    ]);
+    expect(ctx.scheduler.markMissed).not.toHaveBeenCalled();
+    expect(ctx.executor.measureTask).not.toHaveBeenCalled();
+    expect(ctx.realtime.jobStatus.mock.calls.map(([, s]: any[]) => s.status)).toEqual(['processing', 'completed']);
   });
 
   it('un DeviceBusyTimeoutError lanzado por la medición (con el lock tomado) se propaga, no es missed', async () => {

@@ -225,9 +225,24 @@ export class MeasurementJobRunner {
   /**
    * El punto no se mide: 'missed' con el motivo si ningún intento llegó a empezar; si un intento
    * anterior ya empezó (startedAt), 'failed' (condicional a running): se intentó y no se completó.
+   * Si un intento anterior sí guardó su Measurement (falló después, p. ej. al escribir completed),
+   * el punto está medido: 'completed' (condicional a running), nunca failed/missed.
    */
   private async notMeasured(job: Job<MeasurementJobData>, row: ScheduledRow, reason: MissReason): Promise<null> {
     const { scheduledJobId, taskId, userId } = job.data;
+    const measured = await this.prisma.measurement.findFirst({
+      where: { scheduledJobId: scheduledJobId! },
+      select: { id: true },
+    });
+    if (measured) {
+      await this.prisma.scheduledJob.updateMany({
+        where: { id: scheduledJobId!, status: 'running' },
+        data: { status: 'completed', finishedAt: new Date() },
+      });
+      this.logger.warn(`Scheduled job ${scheduledJobId}: ya tenía su medición guardada ⇒ completed (no ${reason})`);
+      this.realtime.jobStatus(userId, { jobId: String(job.id), taskId, status: 'completed' });
+      return null;
+    }
     let error: string;
     if (row.startedAt) {
       await this.prisma.scheduledJob.updateMany({
